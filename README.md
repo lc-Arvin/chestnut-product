@@ -20,7 +20,7 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传控制�
 
 1. 在阿里云百炼创建 API Key，并获取业务空间的 API Host。
 2. 复制 `.env.example` 为 `.env`，填写自己的 Key 和 API Host。
-3. 双击 `Start Chestnut.command`。
+3. 双击 `StartChestnut.command`。
 4. 浏览器会自动打开 `http://127.0.0.1:8080`。
 
 `.env` 已被 Git 忽略，不会提交到仓库。若未填写 `.env`，启动器仍会在运行时询问 Key 和 API Host。
@@ -46,7 +46,7 @@ index.html               页面结构
 style.css                视觉设计与响应式布局
 app.js                   会议流程、麦克风与字幕交互
 server.py                本地静态服务与百炼 WebSocket 安全桥接
-Start Chestnut.command   macOS 启动器
+StartChestnut.command    macOS 启动器
 requirements.txt         Python 依赖
 ```
 
