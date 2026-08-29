@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
+from websockets.exceptions import InvalidStatus
 
 
 HOST = "127.0.0.1"
@@ -271,6 +272,24 @@ async def handle_browser(browser):
                 await asyncio.gather(*pending, return_exceptions=True)
                 for task in done:
                     task.result()
+    except InvalidStatus as error:
+        status = getattr(error.response, "status_code", None)
+        if status == 401:
+            message = (
+                "Bailian rejected this API Key (401). Create a new pay-as-you-go API Key "
+                "in the same workspace as BAILIAN_API_HOST, update .env, and restart Chestnut."
+            )
+        elif status == 403:
+            message = (
+                "This Bailian workspace cannot use the live translation model (403). "
+                "Check the API Key permissions and model access."
+            )
+        else:
+            message = f"Bailian connection was rejected (HTTP {status or 'unknown'})."
+        try:
+            await browser.send(json.dumps({"type": "error", "error": {"message": message}}))
+        except Exception:
+            pass
     except Exception as error:
         message = str(error) or type(error).__name__
         try:
