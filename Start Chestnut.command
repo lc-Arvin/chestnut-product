@@ -3,6 +3,12 @@
 set -e
 cd "${0:A:h}"
 
+if [[ -f ".env" ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
 if [[ -z "$DASHSCOPE_API_KEY" ]]; then
   echo "Chestnut needs your Bailian API key for live translation."
   echo "The key is used only for this session and is not saved."

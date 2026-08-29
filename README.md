@@ -17,11 +17,11 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传控制�
 ## macOS 快速启动
 
 1. 在阿里云百炼创建 API Key，并获取业务空间的 API Host。
-2. 双击 `Start Chestnut.command`。
-3. 根据终端提示输入 API Key 和 API Host。
+2. 复制 `.env.example` 为 `.env`，填写自己的 Key 和 API Host。
+3. 双击 `Start Chestnut.command`。
 4. 浏览器会自动打开 `http://127.0.0.1:8080`。
 
-API Key 只保存在当前进程内存中，不会写入项目文件。
+`.env` 已被 Git 忽略，不会提交到仓库。若未填写 `.env`，启动器仍会在运行时询问 Key 和 API Host。
 
 首次启动会自动创建 Python 虚拟环境并安装依赖。
 
@@ -51,6 +51,7 @@ requirements.txt         Python 依赖
 ## 安全说明
 
 - 不要将 API Key 写入源码或提交到 Git。
+- 真实配置只写入本地 `.env`，仓库仅保留 `.env.example`。
 - 不要在浏览器前端直接暴露长期 API Key。
 - 如果 Key 曾出现在聊天、截图或提交历史中，请立即撤销并重新生成。
 
