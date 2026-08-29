@@ -88,15 +88,21 @@
 
       <section class="screen" id="live-screen" aria-labelledby="live-title">
         <div class="panel live-panel">
+          <h1 class="visually-hidden" id="live-title">Live Caption</h1>
           <div class="live-topbar">
-            <div class="live-pill"><span></span>LIVE</div>
-            <time class="timer" id="meeting-timer" datetime="PT0S">00:00:00</time>
-          </div>
-          <h1 id="live-title">Live Caption</h1>
-          <div class="connection-status" id="connection-status">
-            <span class="connection-dot"></span>
-            <span id="connection-label">Connecting to transcription…</span>
-            <button class="retry-button" id="retry-button" type="button">Reconnect</button>
+            <div class="live-brand" aria-label="ChestnutOne">
+              <span class="brand-mark" aria-hidden="true">✦</span>
+              <span>ChestnutOne</span>
+            </div>
+            <div class="connection-status" id="connection-status">
+              <span class="connection-dot"></span>
+              <span id="connection-label">Connecting to transcription…</span>
+              <button class="retry-button" id="retry-button" type="button">Reconnect</button>
+            </div>
+            <div class="live-session-status">
+              <div class="live-pill" id="live-pill"><span></span><span id="live-state-label">LIVE</span></div>
+              <time class="timer" id="meeting-timer" datetime="PT0S">00:00:00</time>
+            </div>
           </div>
 
           <div class="caption-grid" aria-live="polite" aria-atomic="false">
@@ -124,9 +130,15 @@
             <div><span class="status-dot"></span>Auto detect · English ⇄ Chinese</div>
             <span class="translation-next">Powered by Bailian LiveTranslate</span>
           </div>
-          <button class="stop-button" id="stop-button" type="button">
-            <span class="stop-icon" aria-hidden="true"></span> Stop Meeting
-          </button>
+          <div class="meeting-controls">
+            <button class="pause-button" id="pause-button" type="button">
+              <span class="pause-icon" aria-hidden="true"></span>
+              <span id="pause-label">Pause</span>
+            </button>
+            <button class="stop-button" id="stop-button" type="button">
+              <span class="stop-icon" aria-hidden="true"></span> Stop Meeting
+            </button>
+          </div>
         </div>
       </section>
     </main>

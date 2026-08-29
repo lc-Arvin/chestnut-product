@@ -6,6 +6,8 @@ const screens = {
 
 const startButton = document.querySelector("#start-button");
 const continueButton = document.querySelector("#continue-button");
+const pauseButton = document.querySelector("#pause-button");
+const pauseLabel = document.querySelector("#pause-label");
 const stopButton = document.querySelector("#stop-button");
 const checkPanel = document.querySelector(".check-panel");
 const audioVisual = document.querySelector("#audio-visual");
@@ -14,6 +16,8 @@ const audioEyebrow = document.querySelector("#audio-eyebrow");
 const audioTitle = document.querySelector("#audio-title");
 const audioMessage = document.querySelector("#audio-message");
 const meetingTimer = document.querySelector("#meeting-timer");
+const livePill = document.querySelector("#live-pill");
+const liveStateLabel = document.querySelector("#live-state-label");
 const connectionStatus = document.querySelector("#connection-status");
 const connectionLabel = document.querySelector("#connection-label");
 const retryButton = document.querySelector("#retry-button");
@@ -44,11 +48,13 @@ let silentOutput;
 let connectingRealtime = false;
 let meetingStartedAt;
 let meetingRecords = [];
+let isPaused = false;
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
   screens[name].classList.add("is-active");
   document.body.classList.toggle("is-live", name === "live");
+  if (name !== "live") document.body.classList.remove("is-paused");
 }
 
 function resetAudioCheck() {
@@ -199,8 +205,12 @@ function appendCaption(text, language, role) {
 
 function handleRealtimeEvent(event) {
   if (event.type === "session.updated") {
-    setConnectionState("connected", "Listening · Automatic bilingual translation connected");
-    startPcmStreaming();
+    if (isPaused) {
+      setConnectionState("paused", "Paused · Microphone muted");
+    } else {
+      setConnectionState("connected", "Listening · Automatic bilingual translation connected");
+      startPcmStreaming();
+    }
   }
 
   if (event.type === "conversation.item.input_audio_transcription.text") {
@@ -247,7 +257,7 @@ function downsampleToPcm16(input, inputRate, outputRate = 16000) {
 }
 
 function startPcmStreaming() {
-  if (audioProcessor || !microphoneStream?.active || bailianSocket?.readyState !== WebSocket.OPEN) return;
+  if (isPaused || audioProcessor || !microphoneStream?.active || bailianSocket?.readyState !== WebSocket.OPEN) return;
   streamingSource = audioContext.createMediaStreamSource(microphoneStream);
   audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
   silentOutput = audioContext.createGain();
@@ -292,15 +302,44 @@ function connectBailian() {
   bailianSocket.addEventListener("close", () => {
     connectingRealtime = false;
     stopPcmStreaming();
-    if (screens.live.classList.contains("is-active") && !connectionStatus.classList.contains("is-error")) {
+    if (isPaused && screens.live.classList.contains("is-active")) {
+      setConnectionState("paused", "Paused · Connection will resume when needed");
+    } else if (screens.live.classList.contains("is-active") && !connectionStatus.classList.contains("is-error")) {
       setConnectionState("error", "Live translation disconnected. Please reconnect.");
     }
   });
 }
 
+function updatePauseState() {
+  document.body.classList.toggle("is-paused", isPaused);
+  livePill.classList.toggle("is-paused", isPaused);
+  liveStateLabel.textContent = isPaused ? "PAUSED" : "LIVE";
+  pauseLabel.textContent = isPaused ? "Resume" : "Pause";
+  pauseButton.setAttribute("aria-pressed", String(isPaused));
+}
+
+function togglePause() {
+  if (!screens.live.classList.contains("is-active") || !microphoneStream?.active) return;
+  isPaused = !isPaused;
+  microphoneStream.getAudioTracks().forEach((track) => { track.enabled = !isPaused; });
+  updatePauseState();
+
+  if (isPaused) {
+    stopPcmStreaming();
+    setConnectionState("paused", "Paused · Microphone muted");
+  } else if (bailianSocket?.readyState === WebSocket.OPEN) {
+    setConnectionState("connected", "Listening · Automatic bilingual translation connected");
+    startPcmStreaming();
+  } else {
+    connectBailian();
+  }
+}
+
 async function beginMeeting() {
   clearInterval(meetingInterval);
   meetingSeconds = 0;
+  isPaused = false;
+  updatePauseState();
   meetingStartedAt = new Date();
   meetingRecords = [];
   meetingSaveNotice.hidden = true;
@@ -316,6 +355,7 @@ async function beginMeeting() {
   showScreen("live");
 
   meetingInterval = window.setInterval(() => {
+    if (isPaused) return;
     meetingSeconds += 1;
     meetingTimer.textContent = formatTime(meetingSeconds);
     meetingTimer.dateTime = `PT${meetingSeconds}S`;
@@ -373,6 +413,8 @@ async function stopMeeting() {
   if (bailianSocket?.readyState === WebSocket.OPEN) bailianSocket.send(JSON.stringify({ type: "session.finish" }));
   bailianSocket?.close();
   bailianSocket = undefined;
+  isPaused = false;
+  updatePauseState();
   releaseMicrophone();
   showScreen("setup");
   await saveMeetingTranscript();
@@ -380,5 +422,6 @@ async function stopMeeting() {
 
 startButton.addEventListener("click", beginAudioCheck);
 continueButton.addEventListener("click", beginMeeting);
+pauseButton.addEventListener("click", togglePause);
 stopButton.addEventListener("click", stopMeeting);
 retryButton.addEventListener("click", connectBailian);
