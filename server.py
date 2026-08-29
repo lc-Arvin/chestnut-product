@@ -10,8 +10,10 @@ import json
 import mimetypes
 import os
 import threading
+from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
@@ -31,6 +33,117 @@ class ChestnutHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def is_private_path(self):
+        path = urlsplit(self.path).path
+        private_prefixes = ("/.env", "/.git", "/.venv", "/__pycache__", "/sources/")
+        return path == "/AGENTS.md" or path.startswith(private_prefixes)
+
+    def do_GET(self):
+        if self.is_private_path():
+            self.send_error(404)
+            return
+        super().do_GET()
+
+    def do_HEAD(self):
+        if self.is_private_path():
+            self.send_error(404)
+            return
+        super().do_HEAD()
+
+    def do_POST(self):
+        if self.path != "/api/meetings":
+            self.send_error(404)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 5_000_000:
+                raise ValueError("Invalid transcript size")
+            payload = json.loads(self.rfile.read(length))
+            filename = save_meeting_transcript(payload)
+            response = json.dumps({
+                "filename": filename,
+                "url": f"/meetings/{quote(filename)}",
+            }).encode("utf-8")
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+        except (ValueError, TypeError, json.JSONDecodeError) as error:
+            response = json.dumps({"error": str(error)}).encode("utf-8")
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+
+def transcript_time(total_seconds):
+    total_seconds = max(0, int(total_seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def markdown_quote(text):
+    return "\n".join(f"> {line}" if line else ">" for line in str(text).splitlines())
+
+
+def save_meeting_transcript(payload):
+    entries = payload.get("entries", [])
+    if not isinstance(entries, list):
+        raise ValueError("entries must be a list")
+
+    now = datetime.now().astimezone()
+    meetings_dir = ROOT / "meetings"
+    meetings_dir.mkdir(exist_ok=True)
+    filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}.md"
+    output_path = meetings_dir / filename
+    suffix = 2
+    while output_path.exists():
+        filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}-{suffix}.md"
+        output_path = meetings_dir / filename
+        suffix += 1
+
+    started_at = str(payload.get("started_at") or "")
+    ended_at = str(payload.get("ended_at") or now.isoformat())
+    duration = max(0, int(payload.get("duration_seconds") or 0))
+    lines = [
+        "---",
+        "format: chestnut-meeting-transcript-v1",
+        f"started_at: {json.dumps(started_at)}",
+        f"ended_at: {json.dumps(ended_at)}",
+        f"duration_seconds: {duration}",
+        f"entries: {len(entries)}",
+        "---",
+        "",
+        "# Chestnut Meeting Transcript",
+        "",
+        f"Duration: {transcript_time(duration)}",
+        "",
+    ]
+
+    if not entries:
+        lines.extend(["_No completed captions were recorded._", ""])
+    for entry in entries:
+        if not isinstance(entry, dict) or not str(entry.get("text", "")).strip():
+            continue
+        language = "中文" if entry.get("language") == "zh" else "English"
+        role = "ORIGINAL" if entry.get("role") == "original" else "TRANSLATION"
+        timestamp = transcript_time(entry.get("time_seconds", 0))
+        lines.extend([
+            f"## {timestamp} · {language} · {role}",
+            "",
+            markdown_quote(str(entry["text"]).strip()),
+            "",
+        ])
+
+    temporary_path = output_path.with_suffix(".tmp")
+    temporary_path.write_text("\n".join(lines), encoding="utf-8")
+    temporary_path.replace(output_path)
+    return filename
 
 
 def start_http_server():

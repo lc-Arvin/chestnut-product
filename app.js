@@ -25,6 +25,9 @@ const chineseStage = document.querySelector("#chinese-stage");
 const chinesePlaceholder = document.querySelector("#chinese-placeholder");
 const chineseHistory = document.querySelector("#chinese-history");
 const chineseCurrent = document.querySelector("#chinese-current");
+const meetingSaveNotice = document.querySelector("#meeting-save-notice");
+const meetingSaveMessage = document.querySelector("#meeting-save-message");
+const meetingFileLink = document.querySelector("#meeting-file-link");
 
 let countdownInterval;
 let meetingInterval;
@@ -39,6 +42,8 @@ let audioProcessor;
 let streamingSource;
 let silentOutput;
 let connectingRealtime = false;
+let meetingStartedAt;
+let meetingRecords = [];
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
@@ -183,6 +188,12 @@ function appendCaption(text, language, role) {
   current.textContent = "";
   current.removeAttribute("data-label");
   stage.scrollTop = stage.scrollHeight;
+  meetingRecords.push({
+    time_seconds: meetingSeconds,
+    language: ["zh", "yue"].includes(language) ? "zh" : "en",
+    role,
+    text: text.trim(),
+  });
 }
 
 function handleRealtimeEvent(event) {
@@ -289,6 +300,9 @@ function connectBailian() {
 async function beginMeeting() {
   clearInterval(meetingInterval);
   meetingSeconds = 0;
+  meetingStartedAt = new Date();
+  meetingRecords = [];
+  meetingSaveNotice.hidden = true;
   meetingTimer.textContent = "00:00:00";
   meetingTimer.dateTime = "PT0S";
   englishHistory.replaceChildren();
@@ -309,15 +323,58 @@ async function beginMeeting() {
   connectBailian();
 }
 
-function stopMeeting() {
+function capturePendingCaption(current, language) {
+  const text = current.textContent.trim();
+  if (!text) return;
+  meetingRecords.push({
+    time_seconds: meetingSeconds,
+    language,
+    role: current.classList.contains("is-translation") ? "translation" : "original",
+    text,
+  });
+}
+
+async function saveMeetingTranscript() {
+  meetingSaveNotice.hidden = false;
+  meetingSaveNotice.classList.remove("is-error");
+  meetingSaveMessage.textContent = "Saving meeting transcript…";
+  meetingFileLink.hidden = true;
+
+  try {
+    const response = await fetch("/api/meetings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        started_at: meetingStartedAt?.toISOString(),
+        ended_at: new Date().toISOString(),
+        duration_seconds: meetingSeconds,
+        entries: meetingRecords,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const result = await response.json();
+    meetingSaveMessage.textContent = `Transcript saved · ${result.filename}`;
+    meetingFileLink.href = result.url;
+    meetingFileLink.hidden = false;
+  } catch (error) {
+    meetingSaveNotice.classList.add("is-error");
+    meetingSaveMessage.textContent = "Transcript could not be saved. Keep this window open and try stopping again.";
+    meetingFileLink.hidden = true;
+  }
+}
+
+async function stopMeeting() {
   clearInterval(meetingInterval);
   meetingInterval = undefined;
+  capturePendingCaption(englishCurrent, "en");
+  capturePendingCaption(chineseCurrent, "zh");
   stopPcmStreaming();
   if (bailianSocket?.readyState === WebSocket.OPEN) bailianSocket.send(JSON.stringify({ type: "session.finish" }));
   bailianSocket?.close();
   bailianSocket = undefined;
   releaseMicrophone();
   showScreen("setup");
+  await saveMeetingTranscript();
 }
 
 startButton.addEventListener("click", beginAudioCheck);
