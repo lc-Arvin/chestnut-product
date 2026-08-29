@@ -47,8 +47,12 @@ class MeetingSocket {
 
     task.onError((error) => {
       if (generation !== this.generation) return;
+      const serverHost = environment.getServerHost();
+      const loopbackMessage = environment.isLoopbackHost(serverHost)
+        ? "真机不能使用 127.0.0.1，请返回 Setup 填写电脑的 Wi-Fi 地址"
+        : `无法连接 ${environment.websocketUrl()}，请确认手机与电脑处于同一 Wi-Fi 且 Chestnut 服务已启动`;
       this.emit("error", {
-        message: `无法连接 ${environment.websocketUrl()}，请确认 Chestnut 本地服务已启动`,
+        message: loopbackMessage,
         detail: error,
       });
     });

@@ -32,14 +32,14 @@
         <view class="setting-icon">↗</view>
         <view class="setting-copy">
           <text class="setting-title">本地服务地址</text>
-          <text class="setting-hint">开发者工具使用 127.0.0.1</text>
+          <text class="setting-hint">{{serverHint}}</text>
         </view>
         <input
           class="server-input"
           value="{{serverHost}}"
           bindinput="handleHostInput"
           bindblur="saveHost"
-          placeholder="127.0.0.1"
+          placeholder="{{serverPlaceholder}}"
           confirm-type="done"
         />
       </view>

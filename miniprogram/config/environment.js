@@ -22,6 +22,11 @@ function setServerHost(host) {
   return clean;
 }
 
+function isLoopbackHost(host) {
+  const clean = cleanHost(host).toLowerCase();
+  return clean === "127.0.0.1" || clean === "localhost" || clean === "::1";
+}
+
 function websocketUrl() {
   return `ws://${getServerHost()}:${WEBSOCKET_PORT}`;
 }
@@ -35,6 +40,7 @@ module.exports = {
   DEFAULT_SERVER_HOST,
   getServerHost,
   setServerHost,
+  isLoopbackHost,
   websocketUrl,
   apiUrl,
 };
