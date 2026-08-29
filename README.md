@@ -1,0 +1,59 @@
+# ChestnutOne Conference Console
+
+ChestnutOne 是一个面向国际会议工作人员的极简双语同传控制台原型。
+
+当前版本包含完整的会议操作流程：
+
+- Meeting Setup
+- 真实麦克风 Audio Check
+- 5 秒倒计时与输入音量反馈
+- Live Meeting 计时器
+- 英文原文实时字幕
+- 中文实时翻译字幕
+- 断线重连与安全停止
+
+实时识别与翻译由阿里云百炼 `qwen3.5-livetranslate-flash-realtime` 提供。
+
+## macOS 快速启动
+
+1. 在阿里云百炼创建 API Key，并获取业务空间的 API Host。
+2. 双击 `Start Chestnut.command`。
+3. 根据终端提示输入 API Key 和 API Host。
+4. 浏览器会自动打开 `http://127.0.0.1:8080`。
+
+API Key 只保存在当前进程内存中，不会写入项目文件。
+
+首次启动会自动创建 Python 虚拟环境并安装依赖。
+
+## 手动启动
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+export DASHSCOPE_API_KEY="your-api-key"
+export BAILIAN_API_HOST="your-workspace.cn-beijing.maas.aliyuncs.com"
+.venv/bin/python server.py
+```
+
+然后访问 `http://127.0.0.1:8080`。
+
+## 项目结构
+
+```text
+index.html               页面结构
+style.css                视觉设计与响应式布局
+app.js                   会议流程、麦克风与字幕交互
+server.py                本地静态服务与百炼 WebSocket 安全桥接
+Start Chestnut.command   macOS 启动器
+requirements.txt         Python 依赖
+```
+
+## 安全说明
+
+- 不要将 API Key 写入源码或提交到 Git。
+- 不要在浏览器前端直接暴露长期 API Key。
+- 如果 Key 曾出现在聊天、截图或提交历史中，请立即撤销并重新生成。
+
+## 当前范围
+
+这是 Chestnut Conference Console Prototype。暂不包含用户账户、云端会议存档、说话人分离和生产环境部署。

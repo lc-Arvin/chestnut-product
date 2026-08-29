@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" />
+    <title>Chestnut Conference Console</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="brand" aria-label="Chestnut Conference Console">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>Chestnut</span>
+      </header>
+
+      <section class="screen is-active" id="setup-screen" aria-labelledby="setup-title">
+        <div class="panel setup-panel">
+          <div class="eyebrow">Conference Console</div>
+          <h1 id="setup-title">Meeting Setup</h1>
+          <p class="intro">Everything you need to begin, in one place.</p>
+
+          <div class="settings" aria-label="Meeting settings">
+            <label class="setting-row">
+              <span class="setting-icon" aria-hidden="true">文</span>
+              <span class="setting-copy">
+                <span class="setting-label">Languages</span>
+                <span class="setting-hint">Speech and translation</span>
+              </span>
+              <select aria-label="Languages">
+                <option>English → Chinese</option>
+                <option>Chinese → English</option>
+              </select>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-icon" aria-hidden="true">⌁</span>
+              <span class="setting-copy">
+                <span class="setting-label">Audio Source</span>
+                <span class="setting-hint">Meeting microphone</span>
+              </span>
+              <select aria-label="Audio source">
+                <option>Default Microphone</option>
+              </select>
+            </label>
+
+            <div class="setting-row">
+              <span class="setting-icon" aria-hidden="true">CC</span>
+              <span class="setting-copy">
+                <span class="setting-label">Caption Output</span>
+                <span class="setting-hint">Conference display</span>
+              </span>
+              <span class="status-dot-label"><span class="status-dot"></span>Ready</span>
+            </div>
+          </div>
+
+          <button class="primary-button" id="start-button" type="button">
+            Start Meeting <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="screen" id="audio-screen" aria-labelledby="audio-title" aria-live="polite">
+        <div class="panel check-panel">
+          <div class="audio-visual" id="audio-visual" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="success-mark" id="success-mark" aria-hidden="true">
+            <svg viewBox="0 0 52 52" role="img">
+              <circle cx="26" cy="26" r="25" fill="currentColor" />
+              <path d="M15 26.5 22.3 34 38 18.5" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="eyebrow" id="audio-eyebrow">Checking Microphone</div>
+          <h1 id="audio-title">Audio Check</h1>
+          <p class="intro" id="audio-message">Allow microphone access, then speak normally.</p>
+          <div class="countdown" id="countdown" aria-label="5 seconds remaining">05</div>
+          <button class="primary-button continue-button" id="continue-button" type="button">
+            Continue <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="screen" id="live-screen" aria-labelledby="live-title">
+        <div class="panel live-panel">
+          <div class="live-topbar">
+            <div class="live-pill"><span></span>LIVE</div>
+            <time class="timer" id="meeting-timer" datetime="PT0S">00:00:00</time>
+          </div>
+          <h1 id="live-title">Live Caption</h1>
+          <div class="connection-status" id="connection-status">
+            <span class="connection-dot"></span>
+            <span id="connection-label">Connecting to transcription…</span>
+            <button class="retry-button" id="retry-button" type="button">Reconnect</button>
+          </div>
+
+          <div class="caption-grid" aria-live="polite" aria-atomic="false">
+            <article class="caption-stage" id="english-stage">
+              <div class="caption-language"><span>EN</span>Original</div>
+              <div class="caption-placeholder" id="english-placeholder">
+                <span class="listening-rings" aria-hidden="true"></span>
+                <p>Start speaking when you’re ready.</p>
+              </div>
+              <div class="transcript-history" id="english-history"></div>
+              <p class="transcript-current" id="english-current"></p>
+            </article>
+
+            <article class="caption-stage translation-stage" id="chinese-stage">
+              <div class="caption-language"><span>中</span>中文翻译</div>
+              <div class="caption-placeholder" id="chinese-placeholder">
+                <p>中文翻译将在这里实时显示</p>
+              </div>
+              <div class="transcript-history" id="chinese-history"></div>
+              <p class="transcript-current" id="chinese-current"></p>
+            </article>
+          </div>
+
+          <div class="live-status">
+            <div><span class="status-dot"></span>English → Chinese</div>
+            <span class="translation-next">Powered by Bailian LiveTranslate</span>
+          </div>
+          <button class="stop-button" id="stop-button" type="button">
+            <span class="stop-icon" aria-hidden="true"></span> Stop Meeting
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
