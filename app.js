@@ -48,6 +48,7 @@ let meetingRecords = [];
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
   screens[name].classList.add("is-active");
+  document.body.classList.toggle("is-live", name === "live");
 }
 
 function resetAudioCheck() {

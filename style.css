@@ -256,6 +256,49 @@ select {
 .stop-button:hover { background: rgba(217,45,32,.13); }
 .stop-icon { display: inline-block; width: 11px; height: 11px; margin-right: 7px; border-radius: 2px; background: currentColor; }
 
+/* Immersive live mode keeps captions high and uses almost the full display. */
+body.is-live { overflow: hidden; }
+body.is-live .app-shell {
+  display: block;
+  min-height: 100vh;
+  padding: 12px 18px 18px;
+}
+body.is-live .brand { display: none; }
+body.is-live #live-screen {
+  width: 100%;
+  height: calc(100vh - 30px);
+  padding: 0;
+  place-items: stretch;
+}
+body.is-live .live-panel {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(22px, 3vw, 40px);
+  border-radius: 24px;
+}
+body.is-live .live-topbar { margin-bottom: 18px; }
+body.is-live .live-panel h1 { font-size: clamp(34px, 4vw, 52px); }
+body.is-live .connection-status { margin: 9px 0 18px; }
+body.is-live .caption-grid {
+  min-height: 0;
+  flex: 1;
+}
+body.is-live .caption-stage {
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+}
+body.is-live .transcript-line,
+body.is-live .transcript-current {
+  font-size: clamp(24px, 2.6vw, 38px);
+  line-height: 1.38;
+}
+body.is-live .live-status { margin: 16px 0; }
+body.is-live .stop-button { min-height: 50px; }
+
 @media (max-width: 620px) {
   .app-shell { padding: 20px 16px 24px; }
   .screen { padding: 20px 0 0; }
@@ -268,6 +311,12 @@ select {
   .caption-stage { max-height: 300px; }
   .live-status { align-items: flex-start; flex-direction: column; gap: 10px; }
   .connection-status { align-items: flex-start; }
+  body.is-live { overflow: auto; }
+  body.is-live .app-shell { padding: 8px; }
+  body.is-live #live-screen { height: auto; min-height: calc(100vh - 16px); }
+  body.is-live .live-panel { min-height: calc(100vh - 16px); padding: 22px 16px; border-radius: 20px; }
+  body.is-live .caption-grid { flex: none; }
+  body.is-live .caption-stage { min-height: 260px; max-height: 340px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
