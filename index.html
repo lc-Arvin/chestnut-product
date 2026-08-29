@@ -102,6 +102,16 @@
             <div class="live-session-status">
               <div class="live-pill" id="live-pill"><span></span><span id="live-state-label">LIVE</span></div>
               <time class="timer" id="meeting-timer" datetime="PT0S">00:00:00</time>
+              <div class="meeting-controls" aria-label="Meeting controls">
+                <button class="pause-button" id="pause-button" type="button">
+                  <span class="pause-icon" aria-hidden="true"></span>
+                  <span id="pause-label">Pause</span>
+                </button>
+                <button class="stop-button" id="stop-button" type="button">
+                  <span class="stop-icon" aria-hidden="true"></span>
+                  <span class="stop-label">Stop</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -129,15 +139,6 @@
           <div class="live-status">
             <div><span class="status-dot"></span>Auto detect · English ⇄ Chinese</div>
             <span class="translation-next">Powered by Bailian LiveTranslate</span>
-          </div>
-          <div class="meeting-controls">
-            <button class="pause-button" id="pause-button" type="button">
-              <span class="pause-icon" aria-hidden="true"></span>
-              <span id="pause-label">Pause</span>
-            </button>
-            <button class="stop-button" id="stop-button" type="button">
-              <span class="stop-icon" aria-hidden="true"></span> Stop Meeting
-            </button>
           </div>
         </div>
       </section>
