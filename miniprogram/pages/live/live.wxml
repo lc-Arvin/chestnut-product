@@ -1,0 +1,69 @@
+<view class="live-page {{isPaused ? 'is-paused' : ''}}" style="padding-top: {{safeTop}}px">
+  <view class="topbar">
+    <view class="compact-brand">
+      <view class="brand-mark">✦</view>
+      <text>ChestnutOne</text>
+    </view>
+
+    <view class="session-status">
+      <view class="live-pill {{isPaused ? 'paused-pill' : ''}}">
+        <view class="live-dot"></view>
+        <text>{{isPaused ? 'PAUSED' : 'LIVE'}}</text>
+      </view>
+      <text class="timer">{{timer}}</text>
+      <button class="tool-button pause-tool" bindtap="togglePause">
+        <text class="pause-symbol">{{isPaused ? '▶' : 'Ⅱ'}}</text>
+        <text>{{isPaused ? 'Resume' : 'Pause'}}</text>
+      </button>
+      <button class="tool-button stop-tool" bindtap="stopMeeting" disabled="{{ending}}">
+        <view class="stop-symbol"></view><text>Stop</text>
+      </button>
+    </view>
+
+    <view class="connection {{connectionState}}">
+      <view class="connection-dot"></view>
+      <text>{{connectionMessage}}</text>
+      <button wx:if="{{connectionState === 'error' || connectionState === 'disconnected'}}" bindtap="reconnect">Reconnect</button>
+    </view>
+  </view>
+
+  <view class="caption-stack">
+    <scroll-view class="caption-card english-card" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{englishAnchor}}">
+      <view class="language-label"><text>EN</text> English</view>
+      <view wx:if="{{showEnglishPlaceholder}}" class="placeholder">
+        <view class="listening-rings"></view>
+        <text>Start speaking when you’re ready.</text>
+      </view>
+      <view wx:for="{{englishEntries}}" wx:key="id" class="caption-entry {{item.role}}">
+        <text class="role-label">{{item.label}}</text>
+        <text class="caption-text">{{item.text}}</text>
+      </view>
+      <view wx:if="{{englishCurrent}}" class="caption-entry current {{englishCurrentRole}}">
+        <text class="role-label">{{englishCurrentLabel}}</text>
+        <text class="caption-text">{{englishCurrent}}</text>
+      </view>
+      <view id="english-end" class="scroll-anchor"></view>
+    </scroll-view>
+
+    <scroll-view class="caption-card chinese-card" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{chineseAnchor}}">
+      <view class="language-label"><text>中</text> 中文</view>
+      <view wx:if="{{showChinesePlaceholder}}" class="placeholder">
+        <text>中文原文或翻译将在这里实时显示</text>
+      </view>
+      <view wx:for="{{chineseEntries}}" wx:key="id" class="caption-entry {{item.role}}">
+        <text class="role-label">{{item.label}}</text>
+        <text class="caption-text">{{item.text}}</text>
+      </view>
+      <view wx:if="{{chineseCurrent}}" class="caption-entry current {{chineseCurrentRole}}">
+        <text class="role-label">{{chineseCurrentLabel}}</text>
+        <text class="caption-text">{{chineseCurrent}}</text>
+      </view>
+      <view id="chinese-end" class="scroll-anchor"></view>
+    </scroll-view>
+  </view>
+
+  <view class="footer-status">
+    <view><view class="status-dot"></view><text>Auto detect · English ⇄ 中文</text></view>
+    <text>原文蓝色 · 译文紫色</text>
+  </view>
+</view>

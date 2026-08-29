@@ -1,6 +1,13 @@
-# ChestnutOne Conference Console
+# ChestnutOne
 
-ChestnutOne 是一个面向国际会议工作人员的极简双语同传控制台原型。
+ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品。仓库同时包含 Web 控制台和原生微信小程序 MVP，两端共用本地 Python 百炼安全桥接服务。
+
+## 客户端
+
+- 仓库根目录：现有 Web Conference Console
+- `miniprogram/`：微信原生小程序客户端
+
+小程序的开发者工具导入、局域网调试和已知限制请阅读 [`miniprogram/README.md`](miniprogram/README.md)。开发进度见 [`docs/MINIPROGRAM_MVP_PLAN.md`](docs/MINIPROGRAM_MVP_PLAN.md)。
 
 当前版本包含完整的会议操作流程：
 
@@ -55,13 +62,25 @@ export BAILIAN_API_HOST="your-workspace.cn-beijing.maas.aliyuncs.com"
 ## 项目结构
 
 ```text
-index.html               页面结构
-style.css                视觉设计与响应式布局
-app.js                   会议流程、麦克风与字幕交互
-server.py                本地静态服务与百炼 WebSocket 安全桥接
-StartChestnut.command    macOS 启动器
-requirements.txt         Python 依赖
+index.html                    Web 页面结构
+style.css                     Web 视觉设计与响应式布局
+app.js                        Web 会议流程、麦克风与字幕交互
+miniprogram/                  微信原生小程序 MVP
+server.py                     两端共用的本地 HTTP/WebSocket 服务
+StartChestnut.command         macOS 启动器
+requirements.txt              Python 依赖
+docs/MINIPROGRAM_MVP_PLAN.md  小程序开发计划与验收标准
 ```
+
+## 小程序本地服务
+
+微信开发者工具默认连接 `127.0.0.1`。局域网真机联调时，在 `.env` 中增加：
+
+```text
+CHESTNUT_HOST="0.0.0.0"
+```
+
+然后在小程序 Meeting Setup 页面填写电脑的局域网 IP。该模式只用于开发；正式发布必须使用 HTTPS/WSS 和微信后台合法域名。
 
 ## 安全说明
 

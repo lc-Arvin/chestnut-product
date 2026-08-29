@@ -1,0 +1,102 @@
+.audio-page {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.back-button {
+  position: absolute;
+  z-index: 3;
+  transform: translateY(12rpx);
+  left: 28rpx;
+  display: grid;
+  width: 68rpx;
+  min-height: 68rpx;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 50%;
+  font-size: 54rpx;
+  font-weight: 350;
+  line-height: 60rpx;
+}
+
+.audio-card {
+  width: 100%;
+  padding: 78rpx 42rpx 46rpx;
+  text-align: center;
+}
+
+.audio-card .eyebrow {
+  display: block;
+  margin-top: 54rpx;
+}
+
+.audio-title {
+  font-size: 54rpx;
+}
+
+.audio-copy {
+  min-height: 84rpx;
+}
+
+.meter {
+  display: flex;
+  height: 126rpx;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+}
+
+.meter view {
+  width: 15rpx;
+  height: var(--meter-height);
+  min-height: 24rpx;
+  max-height: 120rpx;
+  background: var(--blue);
+  border-radius: 999rpx;
+  transition: height 90ms linear;
+}
+
+.meter view:nth-child(2),
+.meter view:nth-child(4) {
+  transform: scaleY(0.72);
+}
+
+.meter view:nth-child(1),
+.meter view:nth-child(5) {
+  transform: scaleY(0.45);
+}
+
+.countdown {
+  margin: 54rpx 0 0;
+  font-size: 94rpx;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -4rpx;
+}
+
+.success-mark {
+  display: grid;
+  width: 132rpx;
+  height: 132rpx;
+  margin: 0 auto;
+  place-items: center;
+  color: white;
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 0 0 18rpx rgba(34, 165, 89, 0.09);
+  font-size: 72rpx;
+  font-weight: 520;
+}
+
+.is-passed .eyebrow {
+  color: var(--green);
+}
+
+.continue-button,
+.permission-button {
+  margin-top: 48rpx;
+}

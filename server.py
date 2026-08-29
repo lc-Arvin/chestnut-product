@@ -20,7 +20,7 @@ from websockets.asyncio.server import serve
 from websockets.exceptions import InvalidStatus
 
 
-HOST = "127.0.0.1"
+HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
 HTTP_PORT = int(os.environ.get("CHESTNUT_PORT", "8080"))
 WS_PORT = int(os.environ.get("CHESTNUT_WS_PORT", "8765"))
 ROOT = Path(__file__).resolve().parent
@@ -172,7 +172,8 @@ async def relay_browser_audio(browser, clouds):
         if event.get("type") == "session.finish":
             payload = json.dumps({"event_id": f"finish_{os.urandom(8).hex()}", "type": "session.finish"})
             await asyncio.gather(*(cloud.send(payload) for cloud in clouds))
-            return
+            return True
+    return False
 
 
 async def relay_cloud_events(cloud, browser, target_language, browser_send_lock):
@@ -263,14 +264,26 @@ async def handle_browser(browser):
                 english_to_browser = asyncio.create_task(
                     relay_cloud_events(english_cloud, browser, "en", browser_send_lock)
                 )
+                cloud_tasks = {chinese_to_browser, english_to_browser}
+                all_tasks = {browser_to_cloud, *cloud_tasks}
                 done, pending = await asyncio.wait(
-                    {browser_to_cloud, chinese_to_browser, english_to_browser},
+                    all_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
+                browser_finished_session = False
+                if browser_to_cloud in done and not browser_to_cloud.cancelled():
+                    browser_finished_session = browser_to_cloud.result() is True
+
+                if browser_finished_session:
+                    await asyncio.wait(cloud_tasks, timeout=5, return_when=asyncio.ALL_COMPLETED)
+
+                for task in all_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*all_tasks, return_exceptions=True)
                 for task in done:
+                    if task is browser_to_cloud:
+                        continue
                     task.result()
     except InvalidStatus as error:
         status = getattr(error.response, "status_code", None)
@@ -301,7 +314,10 @@ async def handle_browser(browser):
 async def main():
     http_thread = threading.Thread(target=start_http_server, daemon=True)
     http_thread.start()
-    print(f"Chestnut is ready at http://{HOST}:{HTTP_PORT}")
+    display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
+    print(f"Chestnut is ready at http://{display_host}:{HTTP_PORT}")
+    if HOST == "0.0.0.0":
+        print("LAN access is enabled for Mini Program device testing.")
     print("Bailian live translation bridge is ready.")
     print("Press Control-C to stop.")
     async with serve(handle_browser, HOST, WS_PORT, max_size=None):

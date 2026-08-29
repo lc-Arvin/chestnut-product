@@ -1,0 +1,122 @@
+page {
+  --background: #f5f5f7;
+  --surface: rgba(255, 255, 255, 0.94);
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --line: rgba(0, 0, 0, 0.08);
+  --blue: #0071e3;
+  --blue-soft: rgba(0, 113, 227, 0.08);
+  --purple: #7d49be;
+  --purple-soft: rgba(125, 73, 190, 0.08);
+  --green: #22a559;
+  --red: #d92d20;
+  --amber: #9b6900;
+  min-height: 100%;
+  color: var(--text);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+}
+
+button {
+  font-family: inherit;
+}
+
+button::after {
+  border: 0;
+}
+
+.page-shell {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: calc(env(safe-area-inset-top) + 24rpx) 28rpx calc(env(safe-area-inset-bottom) + 28rpx);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  font-size: 28rpx;
+  font-weight: 650;
+}
+
+.brand-mark {
+  display: grid;
+  width: 52rpx;
+  height: 52rpx;
+  place-items: center;
+  color: white;
+  background: linear-gradient(145deg, #202124, #4b4d52);
+  border-radius: 15rpx;
+  box-shadow: 0 8rpx 22rpx rgba(0, 0, 0, 0.13);
+  font-size: 23rpx;
+}
+
+.card {
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
+  border-radius: 34rpx;
+  box-shadow: 0 28rpx 80rpx rgba(0, 0, 0, 0.06);
+}
+
+.eyebrow {
+  color: var(--blue);
+  font-size: 22rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 18rpx 0 12rpx;
+  font-size: 60rpx;
+  font-weight: 720;
+  letter-spacing: -3rpx;
+  line-height: 1.08;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.primary-button {
+  display: flex;
+  min-height: 100rpx;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  color: white;
+  background: var(--blue);
+  border-radius: 26rpx;
+  font-size: 30rpx;
+  font-weight: 650;
+}
+
+.primary-button[disabled] {
+  color: rgba(255, 255, 255, 0.72);
+  background: #9fbfe0;
+}
+
+.secondary-button {
+  display: flex;
+  min-height: 88rpx;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.055);
+  border-radius: 23rpx;
+  font-size: 28rpx;
+  font-weight: 620;
+}
+
+.status-dot {
+  width: 14rpx;
+  height: 14rpx;
+  flex: none;
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 0 0 8rpx rgba(34, 165, 89, 0.11);
+}

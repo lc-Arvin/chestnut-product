@@ -1,0 +1,53 @@
+<view class="page-shell setup-page" style="padding-top: {{safeTop}}px">
+  <view class="brand">
+    <view class="brand-mark">✦</view>
+    <text>ChestnutOne</text>
+  </view>
+
+  <view class="card setup-card">
+    <text class="eyebrow">Conference Console</text>
+    <view class="title">Meeting Setup</view>
+    <view class="subtitle">中英文会议实时字幕与双向翻译</view>
+
+    <view class="settings">
+      <view class="setting-row">
+        <view class="setting-icon">文</view>
+        <view class="setting-copy">
+          <text class="setting-title">会议语言</text>
+          <text class="setting-hint">自动识别发言语言</text>
+        </view>
+        <text class="setting-value">中文 ⇄ English</text>
+      </view>
+
+      <view class="setting-row">
+        <view class="setting-icon">⌁</view>
+        <view class="setting-copy">
+          <text class="setting-title">声音来源</text>
+          <text class="setting-hint">手机或电脑麦克风</text>
+        </view>
+        <view class="ready"><view class="status-dot"></view>Ready</view>
+      </view>
+
+      <view class="setting-row server-row">
+        <view class="setting-icon">↗</view>
+        <view class="setting-copy">
+          <text class="setting-title">本地服务地址</text>
+          <text class="setting-hint">开发者工具使用 127.0.0.1</text>
+        </view>
+        <input
+          class="server-input"
+          value="{{serverHost}}"
+          bindinput="handleHostInput"
+          bindblur="saveHost"
+          placeholder="127.0.0.1"
+          confirm-type="done"
+        />
+      </view>
+    </view>
+
+    <button class="primary-button" bindtap="startMeeting">
+      Start Meeting <text>→</text>
+    </button>
+    <view class="local-note">LOCAL MVP · API Key 仅保存在电脑端</view>
+  </view>
+</view>

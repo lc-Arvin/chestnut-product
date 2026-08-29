@@ -1,0 +1,21 @@
+<view class="page-shell result-page" style="padding-top: {{safeTop}}px">
+  <view class="brand">
+    <view class="brand-mark">✦</view>
+    <text>ChestnutOne</text>
+  </view>
+
+  <view class="card result-card">
+    <view class="result-mark {{saved ? '' : 'warning'}}">{{saved ? '✓' : '!'}}</view>
+    <text class="eyebrow">{{saved ? 'Meeting Saved' : 'Transcript Not Saved'}}</text>
+    <view class="title result-title">Meeting Complete</view>
+    <view class="subtitle">{{message}}</view>
+
+    <view class="summary">
+      <view><text>Duration</text><text class="summary-value">{{duration}}</text></view>
+      <view><text>Captions</text><text class="summary-value">{{entryCount}}</text></view>
+      <view><text>Transcript</text><text class="summary-value filename">{{filename}}</text></view>
+    </view>
+
+    <button class="primary-button" bindtap="newMeeting">Start New Meeting</button>
+  </view>
+</view>

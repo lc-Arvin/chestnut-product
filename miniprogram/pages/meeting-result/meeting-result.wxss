@@ -1,0 +1,75 @@
+.result-page {
+  display: flex;
+  flex-direction: column;
+  gap: 34rpx;
+}
+
+.result-card {
+  width: 100%;
+  box-sizing: border-box;
+  margin: auto 0;
+  padding: 58rpx 34rpx 38rpx;
+  text-align: center;
+}
+
+.result-mark {
+  display: grid;
+  width: 126rpx;
+  height: 126rpx;
+  margin: 0 auto 46rpx;
+  place-items: center;
+  color: white;
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 0 0 18rpx rgba(34, 165, 89, 0.09);
+  font-size: 68rpx;
+}
+
+.result-mark.warning {
+  background: #e6a23c;
+  box-shadow: 0 0 0 18rpx rgba(230, 162, 60, 0.1);
+}
+
+.result-title {
+  font-size: 52rpx;
+}
+
+.summary {
+  margin: 46rpx 0 38rpx;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.026);
+  border: 1rpx solid var(--line);
+  border-radius: 25rpx;
+  text-align: left;
+}
+
+.summary view {
+  display: flex;
+  min-height: 88rpx;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 0 24rpx;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.summary view:last-child {
+  border-bottom: 0;
+}
+
+.summary text {
+  color: var(--muted);
+  font-size: 23rpx;
+}
+
+.summary-value {
+  font-size: 26rpx;
+  font-weight: 650;
+}
+
+.summary .filename {
+  max-width: 390rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

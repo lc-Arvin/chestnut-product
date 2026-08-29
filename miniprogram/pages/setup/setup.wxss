@@ -1,0 +1,103 @@
+.setup-page {
+  display: flex;
+  flex-direction: column;
+  gap: 34rpx;
+}
+
+.setup-card {
+  width: 100%;
+  margin: auto 0;
+  padding: 52rpx 34rpx 38rpx;
+}
+
+.settings {
+  margin: 48rpx 0 36rpx;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.026);
+  border: 1rpx solid var(--line);
+  border-radius: 26rpx;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 62rpx minmax(0, 1fr) auto;
+  min-height: 112rpx;
+  align-items: center;
+  gap: 16rpx;
+  padding: 0 24rpx;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.setting-row:last-child {
+  border-bottom: 0;
+}
+
+.setting-icon {
+  display: grid;
+  width: 54rpx;
+  height: 54rpx;
+  place-items: center;
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-radius: 15rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+}
+
+.setting-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5rpx;
+}
+
+.setting-title {
+  font-size: 27rpx;
+  font-weight: 630;
+}
+
+.setting-hint,
+.setting-value {
+  color: var(--muted);
+  font-size: 21rpx;
+}
+
+.setting-value {
+  max-width: 190rpx;
+  text-align: right;
+}
+
+.ready {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  color: var(--green);
+  font-size: 23rpx;
+  font-weight: 650;
+}
+
+.server-row {
+  grid-template-columns: 62rpx minmax(0, 1fr);
+  padding-top: 16rpx;
+  padding-bottom: 16rpx;
+}
+
+.server-input {
+  grid-column: 2;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14rpx 18rpx;
+  background: white;
+  border: 1rpx solid var(--line);
+  border-radius: 15rpx;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 24rpx;
+}
+
+.local-note {
+  margin-top: 22rpx;
+  color: #8a8a8f;
+  font-size: 18rpx;
+  letter-spacing: 1rpx;
+  text-align: center;
+}

@@ -1,0 +1,9 @@
+{
+  "desc": "ChestnutOne MVP sitemap",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

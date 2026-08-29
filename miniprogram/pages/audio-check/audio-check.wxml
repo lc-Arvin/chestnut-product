@@ -1,0 +1,21 @@
+<view class="page-shell audio-page" style="padding-top: {{safeTop}}px">
+  <button class="back-button" style="top: {{safeTop}}px" bindtap="goBack" aria-label="返回">‹</button>
+  <view class="card audio-card {{passed ? 'is-passed' : ''}}">
+    <view wx:if="{{!passed}}" class="meter" style="--meter-height: {{meterHeight}}rpx">
+      <view></view><view></view><view></view><view></view><view></view>
+    </view>
+
+    <view wx:if="{{passed}}" class="success-mark">✓</view>
+    <text class="eyebrow">{{eyebrow}}</text>
+    <view class="title audio-title">{{title}}</view>
+    <view class="subtitle audio-copy">{{message}}</view>
+    <view wx:if="{{!passed}}" class="countdown">{{countdown}}</view>
+
+    <button wx:if="{{permissionDenied}}" class="secondary-button permission-button" bindtap="openSettings">
+      打开麦克风设置
+    </button>
+    <button wx:if="{{passed}}" class="primary-button continue-button" bindtap="continueMeeting">
+      Continue <text>→</text>
+    </button>
+  </view>
+</view>
