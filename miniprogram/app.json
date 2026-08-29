@@ -11,11 +11,6 @@
     "backgroundTextStyle": "light",
     "enablePullDownRefresh": false
   },
-  "permission": {
-    "scope.record": {
-      "desc": "用于会议实时字幕和中英文翻译"
-    }
-  },
   "style": "v2",
   "lazyCodeLoading": "requiredComponents",
   "sitemapLocation": "sitemap.json"

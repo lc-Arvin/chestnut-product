@@ -293,6 +293,24 @@
   opacity: 0.72;
 }
 
+@media (max-width: 480px) {
+  .compact-brand {
+    width: 100%;
+  }
+
+  .session-status {
+    width: 100%;
+    box-sizing: border-box;
+    flex: none;
+    justify-content: space-between;
+    gap: 6rpx;
+  }
+
+  .tool-button {
+    padding: 0 12rpx;
+  }
+}
+
 @media (min-width: 900px) {
   .caption-stack {
     grid-template-columns: 1fr 1fr;

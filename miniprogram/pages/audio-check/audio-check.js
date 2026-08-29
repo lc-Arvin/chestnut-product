@@ -30,6 +30,7 @@ Page({
 
   onUnload() {
     clearInterval(this.countdownTimer);
+    clearTimeout(this.recorderStartFallback);
     this.unsubscribeFrame?.();
     this.unsubscribeState?.();
     this.unsubscribeError?.();
@@ -37,10 +38,16 @@ Page({
   },
 
   handleRecorderState(state) {
-    if (state !== "recording" || this.countdownTimer || this.data.passed) return;
+    if (state !== "recording") return;
+    clearTimeout(this.recorderStartFallback);
+    this.beginCountdown(false);
+  },
+
+  beginCountdown(simulated) {
+    if (this.countdownTimer || this.data.passed || this.data.permissionDenied) return;
     this.setData({
-      eyebrow: "Listening",
-      message: "请正常说话，音量条会随声音变化。",
+      eyebrow: simulated ? "Simulator Check" : "Listening",
+      message: simulated ? "开发者工具正在模拟检查；真实声音输入将在真机验证。" : "请正常说话，音量条会随声音变化。",
       permissionDenied: false,
     });
     this.countdownTimer = setInterval(() => {
@@ -48,6 +55,22 @@ Page({
       this.setData({ countdown: String(this.remaining).padStart(2, "0") });
       if (this.remaining <= 0) this.finishCheck();
     }, 1000);
+  },
+
+  startAuthorizedRecorder() {
+    recorder.start();
+    clearTimeout(this.recorderStartFallback);
+    if (this.isDevTools()) {
+      this.recorderStartFallback = setTimeout(() => this.beginCountdown(true), 1500);
+    }
+  },
+
+  isDevTools() {
+    try {
+      return wx.getDeviceInfo().platform === "devtools";
+    } catch (error) {
+      return wx.getSystemInfoSync().platform === "devtools";
+    }
   },
 
   requestMicrophone() {
@@ -59,16 +82,17 @@ Page({
         }
         wx.authorize({
           scope: "scope.record",
-          success: () => recorder.start(),
+          success: () => this.startAuthorizedRecorder(),
           fail: () => this.showPermissionDenied(),
         });
       },
-      fail: () => recorder.start(),
+      fail: () => this.startAuthorizedRecorder(),
     });
   },
 
   showPermissionDenied() {
     clearInterval(this.countdownTimer);
+    clearTimeout(this.recorderStartFallback);
     this.countdownTimer = null;
     this.setData({
       permissionDenied: true,
@@ -107,7 +131,7 @@ Page({
       success: ({ authSetting }) => {
         if (!authSetting["scope.record"]) return;
         this.setData({ permissionDenied: false, message: "正在重新连接麦克风…" });
-        recorder.start();
+        this.startAuthorizedRecorder();
       },
     });
   },
