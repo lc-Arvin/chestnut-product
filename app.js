@@ -150,41 +150,68 @@ function setConnectionState(state, label) {
   connectionLabel.textContent = label;
 }
 
-function appendCaption(text, history, current, placeholder, stage) {
-  if (!text?.trim()) return;
+function captionColumn(language) {
+  const chinese = ["zh", "yue"].includes(language);
+  return chinese
+    ? { history: chineseHistory, current: chineseCurrent, placeholder: chinesePlaceholder, stage: chineseStage }
+    : { history: englishHistory, current: englishCurrent, placeholder: englishPlaceholder, stage: englishStage };
+}
+
+function setCurrentCaption(text, language, role) {
+  const { current, placeholder, stage } = captionColumn(language);
   placeholder.hidden = true;
+  current.textContent = text;
+  current.className = `transcript-current is-${role}`;
+  current.dataset.label = role === "original" ? "ORIGINAL" : "TRANSLATION";
+  stage.scrollTop = stage.scrollHeight;
+}
+
+function appendCaption(text, language, role) {
+  if (!text?.trim()) return;
+  const { history, current, placeholder, stage } = captionColumn(language);
+  placeholder.hidden = true;
+  const entry = document.createElement("div");
+  entry.className = `caption-entry is-${role}`;
+  const badge = document.createElement("span");
+  badge.className = "caption-role";
+  badge.textContent = role === "original" ? "ORIGINAL" : "TRANSLATION";
   const line = document.createElement("p");
   line.className = "transcript-line";
   line.textContent = text.trim();
-  history.append(line);
+  entry.append(badge, line);
+  history.append(entry);
   current.textContent = "";
+  current.removeAttribute("data-label");
   stage.scrollTop = stage.scrollHeight;
 }
 
 function handleRealtimeEvent(event) {
   if (event.type === "session.updated") {
-    setConnectionState("connected", "Listening · Bailian live translation connected");
+    setConnectionState("connected", "Listening · Automatic bilingual translation connected");
     startPcmStreaming();
   }
 
   if (event.type === "conversation.item.input_audio_transcription.text") {
-    englishPlaceholder.hidden = true;
-    englishCurrent.textContent = `${event.text || ""}${event.stash || ""}`;
-    englishStage.scrollTop = englishStage.scrollHeight;
+    setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.language || "en", "original");
   }
 
   if (event.type === "conversation.item.input_audio_transcription.completed") {
-    appendCaption(event.transcript || englishCurrent.textContent, englishHistory, englishCurrent, englishPlaceholder, englishStage);
+    const column = captionColumn(event.language || "en");
+    appendCaption(event.transcript || column.current.textContent, event.language || "en", "original");
   }
 
   if (event.type === "response.text.text") {
-    chinesePlaceholder.hidden = true;
-    chineseCurrent.textContent = `${event.text || ""}${event.stash || ""}`;
-    chineseStage.scrollTop = chineseStage.scrollHeight;
+    setCurrentCaption(
+      `${event.text || ""}${event.stash || ""}`,
+      event.translation_target || "zh",
+      "translation",
+    );
   }
 
   if (event.type === "response.text.done") {
-    appendCaption(event.text || chineseCurrent.textContent, chineseHistory, chineseCurrent, chinesePlaceholder, chineseStage);
+    const language = event.translation_target || "zh";
+    const column = captionColumn(language);
+    appendCaption(event.text || column.current.textContent, language, "translation");
   }
 
   if (event.type === "error") {

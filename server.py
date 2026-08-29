@@ -39,7 +39,7 @@ def start_http_server():
     server.serve_forever()
 
 
-async def relay_browser_audio(browser, cloud):
+async def relay_browser_audio(browser, clouds):
     async for message in browser:
         if isinstance(message, bytes):
             event = {
@@ -47,7 +47,8 @@ async def relay_browser_audio(browser, cloud):
                 "type": "input_audio_buffer.append",
                 "audio": base64.b64encode(message).decode("ascii"),
             }
-            await cloud.send(json.dumps(event))
+            payload = json.dumps(event)
+            await asyncio.gather(*(cloud.send(payload) for cloud in clouds))
             continue
 
         try:
@@ -55,18 +56,47 @@ async def relay_browser_audio(browser, cloud):
         except json.JSONDecodeError:
             continue
         if event.get("type") == "session.finish":
-            await cloud.send(json.dumps({"event_id": f"finish_{os.urandom(8).hex()}", "type": "session.finish"}))
+            payload = json.dumps({"event_id": f"finish_{os.urandom(8).hex()}", "type": "session.finish"})
+            await asyncio.gather(*(cloud.send(payload) for cloud in clouds))
             return
 
 
-async def relay_cloud_events(cloud, browser):
+async def relay_cloud_events(cloud, browser, target_language, browser_send_lock):
     async for message in cloud:
-        await browser.send(message)
         try:
-            if json.loads(message).get("type") == "session.finished":
+            event = json.loads(message)
+            event["translation_target"] = target_language
+            async with browser_send_lock:
+                await browser.send(json.dumps(event))
+            if event.get("type") == "session.finished":
                 return
         except (json.JSONDecodeError, TypeError):
-            pass
+            async with browser_send_lock:
+                await browser.send(message)
+
+
+def session_update(target_language, include_transcription):
+    return {
+        "event_id": f"session_{target_language}_{os.urandom(8).hex()}",
+        "type": "session.update",
+        "session": {
+            "modalities": ["text"],
+            "sample_rate": 16000,
+            "input_audio_format": "pcm",
+            "input_audio_transcription": {
+                "model": "qwen3-asr-flash-realtime",
+            } if include_transcription else None,
+            "translation": {
+                "language": target_language,
+                "same_language_skip_options": {"skip_text": True, "skip_audio": True},
+            },
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.2,
+                "silence_duration_ms": 700,
+            },
+        },
+    }
 
 
 async def handle_browser(browser):
@@ -88,43 +118,46 @@ async def handle_browser(browser):
             open_timeout=20,
             close_timeout=5,
             max_size=None,
-        ) as cloud:
-            first_event = await asyncio.wait_for(cloud.recv(), timeout=20)
-            await browser.send(first_event)
-            session_update = {
-                "event_id": f"session_{os.urandom(8).hex()}",
-                "type": "session.update",
-                "session": {
-                    "modalities": ["text"],
-                    "sample_rate": 16000,
-                    "input_audio_format": "pcm",
-                    "input_audio_transcription": {
-                        "model": "qwen3-asr-flash-realtime",
-                        "language": "en",
-                    },
-                    "translation": {
-                        "language": "zh",
-                        "same_language_skip_options": {"skip_text": True, "skip_audio": True},
-                    },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.2,
-                        "silence_duration_ms": 700,
-                    },
-                },
-            }
-            await cloud.send(json.dumps(session_update))
-            browser_to_cloud = asyncio.create_task(relay_browser_audio(browser, cloud))
-            cloud_to_browser = asyncio.create_task(relay_cloud_events(cloud, browser))
-            done, pending = await asyncio.wait(
-                {browser_to_cloud, cloud_to_browser},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                task.result()
+        ) as chinese_cloud:
+            async with connect(
+                url,
+                additional_headers={"Authorization": f"Bearer {api_key}"},
+                open_timeout=20,
+                close_timeout=5,
+                max_size=None,
+            ) as english_cloud:
+                browser_send_lock = asyncio.Lock()
+                first_chinese, first_english = await asyncio.gather(
+                    asyncio.wait_for(chinese_cloud.recv(), timeout=20),
+                    asyncio.wait_for(english_cloud.recv(), timeout=20),
+                )
+                for message, target in ((first_chinese, "zh"), (first_english, "en")):
+                    event = json.loads(message)
+                    event["translation_target"] = target
+                    await browser.send(json.dumps(event))
+
+                await asyncio.gather(
+                    chinese_cloud.send(json.dumps(session_update("zh", include_transcription=True))),
+                    english_cloud.send(json.dumps(session_update("en", include_transcription=False))),
+                )
+                browser_to_cloud = asyncio.create_task(
+                    relay_browser_audio(browser, (chinese_cloud, english_cloud))
+                )
+                chinese_to_browser = asyncio.create_task(
+                    relay_cloud_events(chinese_cloud, browser, "zh", browser_send_lock)
+                )
+                english_to_browser = asyncio.create_task(
+                    relay_cloud_events(english_cloud, browser, "en", browser_send_lock)
+                )
+                done, pending = await asyncio.wait(
+                    {browser_to_cloud, chinese_to_browser, english_to_browser},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                for task in done:
+                    task.result()
     except Exception as error:
         message = str(error) or type(error).__name__
         try:
