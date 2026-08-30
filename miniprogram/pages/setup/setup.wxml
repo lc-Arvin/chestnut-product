@@ -28,7 +28,16 @@
         <view class="ready"><view class="status-dot"></view>Ready</view>
       </view>
 
-      <view class="setting-row server-row">
+      <view wx:if="{{cloudEnabled}}" class="setting-row">
+        <view class="setting-icon">☁</view>
+        <view class="setting-copy">
+          <text class="setting-title">云端翻译服务</text>
+          <text class="setting-hint">{{serverHint}}</text>
+        </view>
+        <view class="ready"><view class="status-dot"></view>Ready</view>
+      </view>
+
+      <view wx:else class="setting-row server-row">
         <view class="setting-icon">↗</view>
         <view class="setting-copy">
           <text class="setting-title">本地服务地址</text>
@@ -48,6 +57,6 @@
     <button class="primary-button" bindtap="startMeeting">
       Start Meeting <text>→</text>
     </button>
-    <view class="local-note">LOCAL MVP · API Key 仅保存在电脑端</view>
+    <view class="local-note">{{cloudEnabled ? 'CLOUD SERVICE · API Key 安全保存在服务端' : 'LOCAL MVP · API Key 仅保存在电脑端'}}</view>
   </view>
 </view>

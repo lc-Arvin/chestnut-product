@@ -42,15 +42,16 @@
 5. 在小程序 Setup 页面把服务地址改成该局域网 IP，例如 `192.168.1.20`。
 6. 重新启动 Chestnut，再通过开发者工具预览或真机调试。
 
-局域网 HTTP/WS 仅用于开发。正式发布时必须改为备案域名和 HTTPS/WSS，并在微信公众平台配置合法域名。
+局域网 HTTP/WS 仅用于开发。正式版本通过微信云托管的 `callContainer` 与 `connectContainer` 访问后端，无需把百炼 Key 或服务器域名写入小程序。
 
 ## 配置文件
 
-`config/environment.js` 保存开发阶段的默认端口：
+`config/environment.js` 保存本地开发端口以及云托管环境配置：
 
 ```text
-HTTP       8080
-WebSocket 8765
+HTTP + WebSocket  8080
+CLOUD_ENV_ID      留空时使用本地服务
+CLOUD_SERVICE     chestnut-api
 ```
 
 Setup 页面填写的服务器地址保存在微信本地存储中。这里只有主机地址，API Key 始终位于电脑端 `.env`。

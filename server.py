@@ -1,84 +1,27 @@
-"""Local HTTP and WebSocket bridge for Chestnut Conference Console.
+"""Unified HTTP and WebSocket bridge for Chestnut Conference Console.
 
 The browser sends 16 kHz PCM to this process. This process authenticates with
 Alibaba Cloud Model Studio, so the DashScope API key never enters browser code.
+The same single-port service runs locally and in WeChat CloudBase Run.
 """
 
 import asyncio
 import base64
 import json
-import mimetypes
 import os
-import threading
 from datetime import datetime
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlsplit
 
+from aiohttp import WSMsgType, web
 from websockets.asyncio.client import connect
-from websockets.asyncio.server import serve
 from websockets.exceptions import InvalidStatus
 
 
 HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
-HTTP_PORT = int(os.environ.get("CHESTNUT_PORT", "8080"))
-WS_PORT = int(os.environ.get("CHESTNUT_WS_PORT", "8765"))
+PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
 ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
-
-
-class ChestnutHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(ROOT), **kwargs)
-
-    def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
-        super().end_headers()
-
-    def is_private_path(self):
-        path = urlsplit(self.path).path
-        private_prefixes = ("/.env", "/.git", "/.venv", "/__pycache__", "/sources/")
-        return path == "/AGENTS.md" or path.startswith(private_prefixes)
-
-    def do_GET(self):
-        if self.is_private_path():
-            self.send_error(404)
-            return
-        super().do_GET()
-
-    def do_HEAD(self):
-        if self.is_private_path():
-            self.send_error(404)
-            return
-        super().do_HEAD()
-
-    def do_POST(self):
-        if self.path != "/api/meetings":
-            self.send_error(404)
-            return
-
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 5_000_000:
-                raise ValueError("Invalid transcript size")
-            payload = json.loads(self.rfile.read(length))
-            filename = save_meeting_transcript(payload)
-            response = json.dumps({
-                "filename": filename,
-                "url": f"/meetings/{quote(filename)}",
-            }).encode("utf-8")
-            self.send_response(201)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(response)))
-            self.end_headers()
-            self.wfile.write(response)
-        except (ValueError, TypeError, json.JSONDecodeError) as error:
-            response = json.dumps({"error": str(error)}).encode("utf-8")
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(response)))
-            self.end_headers()
-            self.wfile.write(response)
+MAX_TRANSCRIPT_BYTES = 5_000_000
 
 
 def transcript_time(total_seconds):
@@ -147,10 +90,29 @@ def save_meeting_transcript(payload):
     return filename
 
 
-def start_http_server():
-    mimetypes.add_type("application/javascript", ".js")
-    server = ThreadingHTTPServer((HOST, HTTP_PORT), ChestnutHandler)
-    server.serve_forever()
+class AiohttpSocket:
+    """Small compatibility wrapper used by the existing relay functions."""
+
+    def __init__(self, socket):
+        self.socket = socket
+
+    async def send(self, message):
+        if isinstance(message, bytes):
+            await self.socket.send_bytes(message)
+        else:
+            await self.socket.send_str(message)
+
+    async def close(self):
+        await self.socket.close()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        message = await self.socket.receive()
+        if message.type in (WSMsgType.TEXT, WSMsgType.BINARY):
+            return message.data
+        raise StopAsyncIteration
 
 
 async def relay_browser_audio(browser, clouds):
@@ -311,21 +273,77 @@ async def handle_browser(browser):
             pass
 
 
-async def main():
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
+async def health_handler(_request):
+    return web.json_response({"status": "ok", "service": "chestnut-api"})
+
+
+async def websocket_handler(request):
+    socket = web.WebSocketResponse(max_msg_size=0, heartbeat=10)
+    await socket.prepare(request)
+    await handle_browser(AiohttpSocket(socket))
+    if not socket.closed:
+        await socket.close()
+    return socket
+
+
+async def save_meeting_handler(request):
+    try:
+        if request.content_length is not None and request.content_length > MAX_TRANSCRIPT_BYTES:
+            raise ValueError("Invalid transcript size")
+        raw = await request.read()
+        if not raw or len(raw) > MAX_TRANSCRIPT_BYTES:
+            raise ValueError("Invalid transcript size")
+        payload = json.loads(raw)
+        filename = await asyncio.to_thread(save_meeting_transcript, payload)
+        return web.json_response({
+            "filename": filename,
+            "url": f"/meetings/{filename}",
+            "storage": "container-local",
+        }, status=201)
+    except (ValueError, TypeError, json.JSONDecodeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
+async def static_handler(request):
+    relative_path = request.match_info.get("path") or "index.html"
+    candidate = (ROOT / relative_path).resolve()
+    public_files = {"index.html", "style.css", "app.js"}
+    if candidate.parent != ROOT or candidate.name not in public_files:
+        raise web.HTTPNotFound()
+    response = web.FileResponse(candidate)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+async def meeting_file_handler(request):
+    filename = Path(request.match_info["filename"]).name
+    candidate = (ROOT / "meetings" / filename).resolve()
+    if candidate.parent != (ROOT / "meetings").resolve() or not candidate.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(candidate, headers={"Cache-Control": "no-store"})
+
+
+def create_app():
+    app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES)
+    app.router.add_get("/health", health_handler)
+    app.router.add_get("/ws", websocket_handler)
+    app.router.add_post("/api/meetings", save_meeting_handler)
+    app.router.add_get("/meetings/{filename}", meeting_file_handler)
+    app.router.add_get("/{path:.*}", static_handler)
+    return app
+
+
+def main():
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
-    print(f"Chestnut is ready at http://{display_host}:{HTTP_PORT}")
+    print(f"Chestnut is ready at http://{display_host}:{PORT}")
     if HOST == "0.0.0.0":
-        print("LAN access is enabled for Mini Program device testing.")
-    print("Bailian live translation bridge is ready.")
-    print("Press Control-C to stop.")
-    async with serve(handle_browser, HOST, WS_PORT, max_size=None):
-        await asyncio.Future()
+        print("Cloud/LAN access is enabled.")
+    print("HTTP and WebSocket share one port; realtime endpoint: /ws")
+    web.run_app(create_app(), host=HOST, port=PORT, print=None)
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         pass

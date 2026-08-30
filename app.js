@@ -290,7 +290,7 @@ function connectBailian() {
   setConnectionState("connecting", "Connecting to Bailian live translation…");
 
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  bailianSocket = new WebSocket(`${scheme}://${location.hostname}:8765`);
+  bailianSocket = new WebSocket(`${scheme}://${location.host}/ws`);
   bailianSocket.addEventListener("message", ({ data }) => {
     try { handleRealtimeEvent(JSON.parse(data)); } catch { /* Ignore malformed service events. */ }
   });

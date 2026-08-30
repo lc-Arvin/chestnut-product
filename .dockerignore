@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+__pycache__
+*.pyc
+.DS_Store
+meetings
+sources
+miniprogram
+docs
+brand

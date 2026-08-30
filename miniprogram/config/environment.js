@@ -1,7 +1,11 @@
 const DEFAULT_SERVER_HOST = "127.0.0.1";
 const HTTP_PORT = 8080;
-const WEBSOCKET_PORT = 8765;
 const STORAGE_KEY = "chestnut_server_host";
+
+// Fill this after creating the WeChat CloudBase environment. Leaving it empty
+// keeps the Mini Program in local/LAN development mode.
+const CLOUD_ENV_ID = "";
+const CLOUD_SERVICE = "chestnut-api";
 
 function cleanHost(value) {
   return String(value || "")
@@ -27,8 +31,16 @@ function isLoopbackHost(host) {
   return clean === "127.0.0.1" || clean === "localhost" || clean === "::1";
 }
 
+function isCloudEnabled() {
+  return Boolean(CLOUD_ENV_ID && CLOUD_SERVICE);
+}
+
+function cloudConfig() {
+  return { env: CLOUD_ENV_ID };
+}
+
 function websocketUrl() {
-  return `ws://${getServerHost()}:${WEBSOCKET_PORT}`;
+  return `ws://${getServerHost()}:${HTTP_PORT}/ws`;
 }
 
 function apiUrl(path) {
@@ -38,9 +50,13 @@ function apiUrl(path) {
 
 module.exports = {
   DEFAULT_SERVER_HOST,
+  CLOUD_ENV_ID,
+  CLOUD_SERVICE,
   getServerHost,
   setServerHost,
   isLoopbackHost,
+  isCloudEnabled,
+  cloudConfig,
   websocketUrl,
   apiUrl,
 };

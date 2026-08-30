@@ -82,6 +82,20 @@ CHESTNUT_HOST="0.0.0.0"
 
 然后在小程序 Meeting Setup 页面填写电脑的局域网 IP。该模式只用于开发；正式发布必须使用 HTTPS/WSS 和微信后台合法域名。
 
+## 微信云托管
+
+仓库根目录包含云托管使用的 `Dockerfile`。容器将 HTTP、WebSocket 统一监听在端口 80：
+
+```text
+GET  /health        健康检查
+GET  /ws            实时音频与字幕 WebSocket
+POST /api/meetings  保存会议稿
+```
+
+在 `miniprogram/config/environment.js` 填写 `CLOUD_ENV_ID` 后，小程序会自动改用 `wx.cloud.connectContainer` 和 `wx.cloud.callContainer`；保持为空则继续使用本地局域网服务。
+
+云托管服务需要设置 `DASHSCOPE_API_KEY` 与 `BAILIAN_API_HOST` 环境变量。不要把真实密钥写进代码。
+
 ## 安全说明
 
 - 不要将 API Key 写入源码或提交到 Git。
