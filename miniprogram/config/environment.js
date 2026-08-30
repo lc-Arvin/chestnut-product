@@ -4,7 +4,7 @@ const STORAGE_KEY = "chestnut_server_host";
 
 // Fill this after creating the WeChat CloudBase environment. Leaving it empty
 // keeps the Mini Program in local/LAN development mode.
-const CLOUD_ENV_ID = "";
+const CLOUD_ENV_ID = "chestnut-prod-d6ggcq8yzf8d2e322";
 const CLOUD_SERVICE = "chestnut-api";
 
 function cleanHost(value) {
