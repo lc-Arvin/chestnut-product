@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
+from qcloud_cos import CosConfig, CosS3Client
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
@@ -22,6 +23,8 @@ PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
 ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
 MAX_TRANSCRIPT_BYTES = 5_000_000
+COS_BUCKET = os.environ.get("CHESTNUT_COS_BUCKET", "").strip()
+COS_REGION = os.environ.get("TENCENTCLOUD_REGION", os.environ.get("CHESTNUT_COS_REGION", "")).strip()
 
 
 def transcript_time(total_seconds):
@@ -35,22 +38,13 @@ def markdown_quote(text):
     return "\n".join(f"> {line}" if line else ">" for line in str(text).splitlines())
 
 
-def save_meeting_transcript(payload):
+def render_meeting_transcript(payload):
     entries = payload.get("entries", [])
     if not isinstance(entries, list):
         raise ValueError("entries must be a list")
 
     now = datetime.now().astimezone()
-    meetings_dir = ROOT / "meetings"
-    meetings_dir.mkdir(exist_ok=True)
     filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}.md"
-    output_path = meetings_dir / filename
-    suffix = 2
-    while output_path.exists():
-        filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}-{suffix}.md"
-        output_path = meetings_dir / filename
-        suffix += 1
-
     started_at = str(payload.get("started_at") or "")
     ended_at = str(payload.get("ended_at") or now.isoformat())
     duration = max(0, int(payload.get("duration_seconds") or 0))
@@ -84,10 +78,59 @@ def save_meeting_transcript(payload):
             "",
         ])
 
+    return filename, "\n".join(lines)
+
+
+def safe_owner_id(value):
+    owner = "".join(character for character in str(value or "") if character.isalnum() or character in "-_")
+    return owner[:128] or "anonymous"
+
+
+def save_local_transcript(filename, content):
+    meetings_dir = ROOT / "meetings"
+    meetings_dir.mkdir(exist_ok=True)
+    output_path = meetings_dir / filename
+    suffix = 2
+    while output_path.exists():
+        output_path = meetings_dir / filename.replace(".md", f"-{suffix}.md")
+        suffix += 1
     temporary_path = output_path.with_suffix(".tmp")
-    temporary_path.write_text("\n".join(lines), encoding="utf-8")
+    temporary_path.write_text(content, encoding="utf-8")
     temporary_path.replace(output_path)
-    return filename
+    return {"filename": output_path.name, "storage": "local", "url": f"/meetings/{output_path.name}"}
+
+
+def save_cos_transcript(filename, content, owner_id):
+    secret_id = os.environ.get("TENCENTCLOUD_SECRETID", "")
+    secret_key = os.environ.get("TENCENTCLOUD_SECRETKEY", "")
+    token = os.environ.get("TENCENTCLOUD_SESSIONTOKEN", "")
+    if not COS_REGION:
+        raise RuntimeError("TENCENTCLOUD_REGION is unavailable; configure CHESTNUT_COS_REGION")
+    if not secret_id or not secret_key:
+        raise RuntimeError("CloudBase runtime COS credentials are unavailable")
+
+    config = CosConfig(
+        Region=COS_REGION,
+        SecretId=secret_id,
+        SecretKey=secret_key,
+        Token=token or None,
+        Scheme="https",
+    )
+    object_key = f"meetings/{safe_owner_id(owner_id)}/{filename}"
+    CosS3Client(config).put_object(
+        Bucket=COS_BUCKET,
+        Key=object_key,
+        Body=content.encode("utf-8"),
+        ContentType="text/markdown; charset=utf-8",
+    )
+    return {"filename": filename, "storage": "cos", "object_key": object_key}
+
+
+def save_meeting_transcript(payload, owner_id=""):
+    filename, content = render_meeting_transcript(payload)
+    if COS_BUCKET:
+        return save_cos_transcript(filename, content, owner_id)
+    return save_local_transcript(filename, content)
 
 
 class AiohttpSocket:
@@ -294,14 +337,15 @@ async def save_meeting_handler(request):
         if not raw or len(raw) > MAX_TRANSCRIPT_BYTES:
             raise ValueError("Invalid transcript size")
         payload = json.loads(raw)
-        filename = await asyncio.to_thread(save_meeting_transcript, payload)
-        return web.json_response({
-            "filename": filename,
-            "url": f"/meetings/{filename}",
-            "storage": "container-local",
-        }, status=201)
+        owner_id = request.headers.get("x-wx-openid", "")
+        saved = await asyncio.to_thread(save_meeting_transcript, payload, owner_id)
+        print(f"Meeting transcript saved: storage={saved['storage']} owner={safe_owner_id(owner_id)}")
+        return web.json_response(saved, status=201)
     except (ValueError, TypeError, json.JSONDecodeError) as error:
         return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        print(f"Meeting transcript save failed: {type(error).__name__}: {error}")
+        return web.json_response({"error": "会议稿云端保存失败，请稍后重试"}, status=503)
 
 
 async def static_handler(request):
