@@ -98,14 +98,13 @@ POST /api/meetings  保存会议稿
 
 设置 `CHESTNUT_COS_BUCKET` 后，会议稿会写入对象存储的 `meetings/{OpenID}/` 路径。地域默认读取 `TENCENTCLOUD_REGION`，也可通过 `CHESTNUT_COS_REGION` 配置。凭证优先使用云托管临时凭证；容器环境未注入凭证时，使用仅授权当前 Bucket 的 `CHESTNUT_COS_SECRET_ID` 与 `CHESTNUT_COS_SECRET_KEY` 子账号凭证。不要使用主账号密钥。未设置存储桶时，本地开发仍写入仓库的 `meetings/` 目录。
 
-如需独立验证 COS 子账号，可将四项 `CHESTNUT_COS_*` 配置临时写入本地 `.env`，然后执行：
+如需独立验证 COS 子账号，执行：
 
 ```bash
-set -a; source .env; set +a
 .venv/bin/python scripts/test_cos_access.py
 ```
 
-脚本不会打印 SecretKey，只会在 `meetings/_diagnostics/` 写入一个可安全删除的小文件。
+按提示输入 Bucket、地域和凭证。SecretKey 使用隐藏输入，不会写入文件或终端历史。脚本不会打印 SecretKey，只会在 `meetings/_diagnostics/` 写入一个可安全删除的小文件。
 
 ## 安全说明
 

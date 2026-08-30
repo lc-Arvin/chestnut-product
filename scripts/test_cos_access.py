@@ -3,18 +3,11 @@
 
 import os
 import sys
+from getpass import getpass
 from datetime import datetime, timezone
 
 from qcloud_cos import CosConfig, CosS3Client
 from qcloud_cos.cos_exception import CosClientError, CosServiceError
-
-
-REQUIRED_VARIABLES = (
-    "CHESTNUT_COS_BUCKET",
-    "CHESTNUT_COS_REGION",
-    "CHESTNUT_COS_SECRET_ID",
-    "CHESTNUT_COS_SECRET_KEY",
-)
 
 
 def masked(value):
@@ -25,15 +18,17 @@ def masked(value):
 
 
 def main():
-    missing = [name for name in REQUIRED_VARIABLES if not os.environ.get(name)]
-    if missing:
-        print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
+    if not sys.stdin.isatty() and not all(os.environ.get(name) for name in (
+        "CHESTNUT_COS_BUCKET", "CHESTNUT_COS_REGION",
+        "CHESTNUT_COS_SECRET_ID", "CHESTNUT_COS_SECRET_KEY",
+    )):
+        print("COS variables are missing and interactive input is unavailable.", file=sys.stderr)
         return 2
 
-    bucket = os.environ["CHESTNUT_COS_BUCKET"].strip()
-    region = os.environ["CHESTNUT_COS_REGION"].strip()
-    secret_id = os.environ["CHESTNUT_COS_SECRET_ID"].strip()
-    secret_key = os.environ["CHESTNUT_COS_SECRET_KEY"].strip()
+    bucket = os.environ.get("CHESTNUT_COS_BUCKET", "").strip() or input("Bucket: ").strip()
+    region = os.environ.get("CHESTNUT_COS_REGION", "").strip() or input("Region: ").strip()
+    secret_id = os.environ.get("CHESTNUT_COS_SECRET_ID", "").strip() or input("SecretId: ").strip()
+    secret_key = os.environ.get("CHESTNUT_COS_SECRET_KEY", "").strip() or getpass("SecretKey (hidden): ").strip()
     object_key = f"meetings/_diagnostics/cos-access-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.txt"
 
     print("Chestnut COS access diagnostic")
