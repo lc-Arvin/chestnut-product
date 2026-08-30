@@ -298,7 +298,7 @@
   opacity: 0.72;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px) and (orientation: portrait) {
   .compact-brand {
     width: 100%;
   }
@@ -318,25 +318,89 @@
 
 @media (orientation: landscape) {
   .live-page {
-    gap: 8rpx;
-    padding-bottom: calc(env(safe-area-inset-bottom) + 8rpx);
+    gap: 5rpx;
+    padding-top: 4rpx !important;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 4rpx);
   }
 
   .topbar {
-    gap: 7rpx 12rpx;
-    padding: 8rpx 10rpx;
+    min-height: 50rpx;
+    flex: none;
+    flex-wrap: nowrap;
+    gap: 8rpx;
+    padding: 4rpx 8rpx;
+    border-radius: 16rpx;
+  }
+
+  .compact-brand {
+    width: auto;
+    flex: none;
+    gap: 6rpx;
+    font-size: 18rpx;
+  }
+
+  .compact-brand .brand-mark {
+    width: 34rpx;
+    height: 34rpx;
+    border-radius: 10rpx;
+    font-size: 14rpx;
+  }
+
+  .session-status {
+    width: auto;
+    flex: none;
+    gap: 5rpx;
+  }
+
+  .live-pill {
+    gap: 5rpx;
+    padding: 6rpx 9rpx;
+    font-size: 15rpx;
+  }
+
+  .live-dot {
+    width: 8rpx;
+    height: 8rpx;
+  }
+
+  .timer {
+    margin: 0 2rpx;
+    font-size: 19rpx;
+  }
+
+  .tool-button {
+    min-height: 40rpx;
+    gap: 4rpx;
+    padding: 0 9rpx;
+    border-radius: 11rpx;
+    font-size: 16rpx;
   }
 
   .connection {
-    padding-top: 0;
-    padding-bottom: 0;
-    font-size: 18rpx;
+    width: auto;
+    min-width: 20rpx;
+    flex: 1;
+    gap: 6rpx;
+    padding: 0 3rpx;
+    font-size: 15rpx;
+  }
+
+  .connection-dot {
+    width: 9rpx;
+    height: 9rpx;
+  }
+
+  .connection button {
+    min-height: 36rpx;
+    padding: 0 9rpx;
+    font-size: 15rpx;
+    line-height: 36rpx;
   }
 
   .caption-stack {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
-    gap: 10rpx;
+    gap: 6rpx;
   }
 
   .caption-card {
