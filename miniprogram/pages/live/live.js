@@ -64,6 +64,10 @@ Page({
     this.setData({ isPaused: true, connectionMessage: "小程序进入后台 · 麦克风已暂停" });
   },
 
+  onResize() {
+    this.setData({ safeTop: safeTopPadding(4) });
+  },
+
   startTimer() {
     this.timerInterval = setInterval(() => {
       if (this.data.isPaused || this.data.ending) return;
