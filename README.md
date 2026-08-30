@@ -96,7 +96,7 @@ POST /api/meetings  保存会议稿
 
 云托管服务需要设置 `DASHSCOPE_API_KEY` 与 `BAILIAN_API_HOST` 环境变量。不要把真实密钥写进代码。
 
-设置 `CHESTNUT_COS_BUCKET` 后，会议稿会使用云托管自动注入的临时凭证写入对象存储的 `meetings/{OpenID}/` 路径。地域默认读取 `TENCENTCLOUD_REGION`；本地模拟 COS 时可以额外设置 `CHESTNUT_COS_REGION`。未设置存储桶时，本地开发仍写入仓库的 `meetings/` 目录。
+设置 `CHESTNUT_COS_BUCKET` 后，会议稿会写入对象存储的 `meetings/{OpenID}/` 路径。地域默认读取 `TENCENTCLOUD_REGION`，也可通过 `CHESTNUT_COS_REGION` 配置。凭证优先使用云托管临时凭证；容器环境未注入凭证时，使用仅授权当前 Bucket 的 `CHESTNUT_COS_SECRET_ID` 与 `CHESTNUT_COS_SECRET_KEY` 子账号凭证。不要使用主账号密钥。未设置存储桶时，本地开发仍写入仓库的 `meetings/` 目录。
 
 ## 安全说明
 

@@ -101,13 +101,13 @@ def save_local_transcript(filename, content):
 
 
 def save_cos_transcript(filename, content, owner_id):
-    secret_id = os.environ.get("TENCENTCLOUD_SECRETID", "")
-    secret_key = os.environ.get("TENCENTCLOUD_SECRETKEY", "")
-    token = os.environ.get("TENCENTCLOUD_SESSIONTOKEN", "")
+    secret_id = os.environ.get("TENCENTCLOUD_SECRETID") or os.environ.get("CHESTNUT_COS_SECRET_ID", "")
+    secret_key = os.environ.get("TENCENTCLOUD_SECRETKEY") or os.environ.get("CHESTNUT_COS_SECRET_KEY", "")
+    token = os.environ.get("TENCENTCLOUD_SESSIONTOKEN") or os.environ.get("CHESTNUT_COS_SESSION_TOKEN", "")
     if not COS_REGION:
         raise RuntimeError("TENCENTCLOUD_REGION is unavailable; configure CHESTNUT_COS_REGION")
     if not secret_id or not secret_key:
-        raise RuntimeError("CloudBase runtime COS credentials are unavailable")
+        raise RuntimeError("COS credentials are unavailable; configure a least-privilege COS service account")
 
     config = CosConfig(
         Region=COS_REGION,
