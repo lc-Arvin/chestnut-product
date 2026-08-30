@@ -52,12 +52,11 @@ def main():
             ContentType="text/plain; charset=utf-8",
         )
     except CosServiceError as error:
-        details = error.get_error_info()
         print("\nRESULT: COS rejected the request", file=sys.stderr)
-        print(f"  Code:      {details.get('code', 'unknown')}", file=sys.stderr)
-        print(f"  Message:   {details.get('message', 'unknown')}", file=sys.stderr)
-        print(f"  Resource:  {details.get('resource', 'unknown')}", file=sys.stderr)
-        print(f"  RequestId: {details.get('requestid', 'unknown')}", file=sys.stderr)
+        print(f"  Code:      {error.get_error_code()}", file=sys.stderr)
+        print(f"  Message:   {error.get_error_msg()}", file=sys.stderr)
+        print(f"  Resource:  {error.get_resource_location()}", file=sys.stderr)
+        print(f"  RequestId: {error.get_request_id()}", file=sys.stderr)
         return 1
     except CosClientError as error:
         print(f"\nRESULT: COS client/network error: {error}", file=sys.stderr)
