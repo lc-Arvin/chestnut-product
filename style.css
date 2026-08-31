@@ -241,18 +241,20 @@ select {
 .caption-language { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin-bottom: 22px; color: var(--muted); font-size: 13px; font-weight: 650; }
 .caption-language span { display: grid; min-width: 27px; height: 27px; place-items: center; padding: 0 5px; color: var(--blue); background: rgba(0,113,227,.09); border-radius: 8px; font-size: 11px; }
 .caption-placeholder { min-height: 190px; display: grid; place-items: center; align-content: center; gap: 22px; color: var(--muted); text-align: center; }
+.caption-placeholder[hidden] { display: none; }
 .caption-placeholder p { margin: 0; }
 .listening-rings { width: 18px; height: 18px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 9px rgba(0,113,227,.09), 0 0 0 18px rgba(0,113,227,.04); animation: pulse 1.5s infinite; }
-.transcript-history { display: grid; gap: 16px; }
+.transcript-history { display: grid; gap: 12px; }
 .transcript-line, .transcript-current { margin: 0; font-size: clamp(19px, 2.2vw, 26px); line-height: 1.42; letter-spacing: -.025em; }
 .transcript-line { color: var(--text); }
-.caption-entry { display: grid; gap: 7px; padding: 14px 16px; border-left: 3px solid transparent; border-radius: 0 14px 14px 0; }
+.caption-entry { display: grid; gap: 7px; padding: 12px 16px; border-left: 3px solid transparent; border-radius: 0 14px 14px 0; }
 .caption-entry.is-original { background: rgba(0,113,227,.06); border-left-color: var(--blue); }
 .caption-entry.is-translation { background: rgba(125,73,190,.07); border-left-color: #7d49be; }
 .caption-role { width: fit-content; padding: 3px 7px; border-radius: 6px; font-size: 9px; font-weight: 780; letter-spacing: .08em; }
 .is-original .caption-role { color: var(--blue); background: rgba(0,113,227,.1); }
 .is-translation .caption-role { color: #7d49be; background: rgba(125,73,190,.1); }
 .transcript-current { margin-top: 16px; padding: 14px 16px; color: var(--muted); border-left: 3px solid transparent; border-radius: 0 14px 14px 0; }
+.transcript-current:empty { display: none; }
 .transcript-current:not(:empty)::before { content: attr(data-label); display: block; width: fit-content; margin-bottom: 7px; padding: 3px 7px; border-radius: 6px; font-size: 9px; font-weight: 780; letter-spacing: .08em; }
 .transcript-current.is-original { color: var(--text); background: rgba(0,113,227,.04); border-left-color: var(--blue); }
 .transcript-current.is-original::before { color: var(--blue); background: rgba(0,113,227,.1); }

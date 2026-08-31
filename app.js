@@ -56,6 +56,7 @@ let stoppingMeeting = false;
 
 const MAX_SOCKET_BUFFER_BYTES = 512 * 1024;
 const MAX_DROPPED_AUDIO_FRAMES = 240;
+const MAX_VISIBLE_CAPTIONS_PER_LANGUAGE = 6;
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
@@ -177,12 +178,19 @@ function captionColumn(language) {
 }
 
 function setCurrentCaption(text, language, role) {
-  const { current, placeholder, stage } = captionColumn(language);
-  placeholder.hidden = true;
-  current.textContent = text;
+  const { history, current, placeholder, stage } = captionColumn(language);
+  const caption = text?.trim() || "";
+  placeholder.hidden = Boolean(caption || history.children.length);
+  current.textContent = caption;
   current.className = `transcript-current is-${role}`;
   current.dataset.label = role === "original" ? "ORIGINAL" : "TRANSLATION";
   stage.scrollTop = stage.scrollHeight;
+}
+
+function clearCurrentCaption(current) {
+  current.textContent = "";
+  current.className = "transcript-current";
+  current.removeAttribute("data-label");
 }
 
 function appendCaption(text, language, role) {
@@ -199,8 +207,10 @@ function appendCaption(text, language, role) {
   line.textContent = text.trim();
   entry.append(badge, line);
   history.append(entry);
-  current.textContent = "";
-  current.removeAttribute("data-label");
+  while (history.children.length > MAX_VISIBLE_CAPTIONS_PER_LANGUAGE) {
+    history.firstElementChild.remove();
+  }
+  if (current.classList.contains(`is-${role}`)) clearCurrentCaption(current);
   stage.scrollTop = stage.scrollHeight;
   meetingRecords.push({
     time_seconds: meetingSeconds,
@@ -396,8 +406,8 @@ async function beginMeeting() {
   meetingTimer.dateTime = "PT0S";
   englishHistory.replaceChildren();
   chineseHistory.replaceChildren();
-  englishCurrent.textContent = "";
-  chineseCurrent.textContent = "";
+  clearCurrentCaption(englishCurrent);
+  clearCurrentCaption(chineseCurrent);
   englishPlaceholder.hidden = false;
   chinesePlaceholder.hidden = false;
   setConnectionState("connecting", "Connecting to Bailian live translation…");
