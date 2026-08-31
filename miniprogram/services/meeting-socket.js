@@ -6,6 +6,8 @@ class MeetingSocket {
     this.listeners = new Map();
     this.intentionalClose = false;
     this.generation = 0;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
   }
 
   subscribe(event, listener) {
@@ -16,6 +18,20 @@ class MeetingSocket {
 
   emit(event, payload) {
     this.listeners.get(event)?.forEach((listener) => listener(payload));
+  }
+
+  scheduleReconnect() {
+    if (this.intentionalClose || this.reconnectTimer) return;
+    const delay = Math.min(1000 * (2 ** this.reconnectAttempts), 10000);
+    this.reconnectAttempts += 1;
+    this.emit("state", {
+      state: "reconnecting",
+      message: `翻译连接中断，${Math.ceil(delay / 1000)} 秒后自动重连…`,
+    });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   connect() {
@@ -56,7 +72,9 @@ class MeetingSocket {
         if (generation !== this.generation) return;
         if (typeof data !== "string") return;
         try {
-          this.emit("event", JSON.parse(data));
+          const event = JSON.parse(data);
+          if (event.type === "session.updated") this.reconnectAttempts = 0;
+          this.emit("event", event);
         } catch (error) {
           this.emit("error", { message: "收到无法解析的服务消息" });
         }
@@ -70,22 +88,21 @@ class MeetingSocket {
           : environment.isLoopbackHost(serverHost)
             ? "真机不能使用 127.0.0.1，请返回 Setup 填写电脑的 Wi-Fi 地址"
             : `无法连接 ${environment.websocketUrl()}，请确认手机与电脑处于同一 Wi-Fi 且 Chestnut 服务已启动`;
-        this.emit("error", {
-          message: loopbackMessage,
-          detail: error,
-        });
+        this.emit("state", { state: "reconnecting", message: loopbackMessage });
+        this.scheduleReconnect();
       });
 
       task.onClose(() => {
         if (generation !== this.generation) return;
         this.task = null;
         if (!this.intentionalClose) {
-          this.emit("state", { state: "disconnected", message: "翻译连接已断开" });
+          this.scheduleReconnect();
         }
       });
     }).catch((error) => {
       if (generation !== this.generation) return;
-      this.emit("error", { message: "无法建立翻译服务连接", detail: error });
+      this.emit("state", { state: "reconnecting", message: "无法建立翻译服务连接，正在自动重试…" });
+      this.scheduleReconnect();
     });
   }
 
@@ -105,6 +122,8 @@ class MeetingSocket {
 
   close() {
     this.intentionalClose = true;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.generation += 1;
     const task = this.task;
     this.task = null;

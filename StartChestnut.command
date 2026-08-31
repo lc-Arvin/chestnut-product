@@ -12,9 +12,24 @@ fi
 CHESTNUT_URL="http://127.0.0.1:${CHESTNUT_PORT:-8080}"
 
 if /usr/bin/curl --silent --fail --max-time 1 "$CHESTNUT_URL/health" >/dev/null 2>&1; then
-  open "$CHESTNUT_URL"
-  echo "Chestnut is already running. The meeting console has been opened."
-  exit 0
+  echo "Chestnut is already running. Restarting it with the latest configuration…"
+  running_pids=$(/usr/sbin/lsof -tiTCP:"${CHESTNUT_PORT:-8080}" -sTCP:LISTEN 2>/dev/null || true)
+  for running_pid in ${(f)running_pids}; do
+    kill "$running_pid" 2>/dev/null || true
+  done
+
+  for attempt in {1..30}; do
+    if ! /usr/bin/curl --silent --fail --max-time 1 "$CHESTNUT_URL/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  remaining_pids=$(/usr/sbin/lsof -tiTCP:"${CHESTNUT_PORT:-8080}" -sTCP:LISTEN 2>/dev/null || true)
+  for remaining_pid in ${(f)remaining_pids}; do
+    echo "Chestnut did not stop in time. Force stopping process $remaining_pid…"
+    kill -9 "$remaining_pid" 2>/dev/null || true
+  done
 fi
 
 if [[ -z "$DASHSCOPE_API_KEY" ]]; then

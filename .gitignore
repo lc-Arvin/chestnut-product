@@ -6,4 +6,5 @@ __pycache__/
 sources/
 AGENTS.md
 meetings/
+logs/
 miniprogram/project.private.config.json

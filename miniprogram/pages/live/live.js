@@ -78,6 +78,10 @@ Page({
 
   handleConnectionState({ state, message }) {
     if (this.data.ending) return;
+    if (["connecting", "reconnecting", "disconnected"].includes(state)) {
+      this.readyForAudio = false;
+      recorder.pause();
+    }
     this.setData({ connectionState: state, connectionMessage: message });
   },
 
@@ -86,9 +90,8 @@ Page({
     this.readyForAudio = false;
     recorder.pause();
     this.setData({
-      connectionState: "error",
-      connectionMessage: error.message || "实时翻译连接失败",
-      isPaused: true,
+      connectionState: "reconnecting",
+      connectionMessage: error.message || "实时翻译连接失败，正在自动恢复…",
     });
   },
 

@@ -22,7 +22,8 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 - 中英文双向自动识别与互译
 - 蓝色原文、紫色译文角色提示
 - 停止会议时自动保存完整双语会议稿
-- 断线重连与安全停止
+- 模型连接异常后的自动重连与安全停止
+- 本地轮转诊断日志、音频发送超时与无响应看门狗
 
 实时识别与翻译由阿里云百炼 `qwen3.5-livetranslate-flash-realtime` 提供。
 
@@ -36,6 +37,26 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 `.env` 已被 Git 忽略，不会提交到仓库。若未填写 `.env`，启动器仍会在运行时询问 Key 和 API Host。
 
 首次启动会自动创建 Python 虚拟环境并安装依赖。
+
+## 诊断日志
+
+本地服务默认把运行日志同时输出到终端和以下文件：
+
+```text
+logs/chestnut.log
+```
+
+日志按 5 MB 轮转，最多保留 5 份历史文件。日志只包含会话编号、连接目标、事件数量、音频字节数、Request ID、超时和异常类型，不记录语音、字幕正文或 API Key。
+
+可通过 `.env` 调整：
+
+```text
+CHESTNUT_LOG_FILE="/path/to/chestnut.log"
+CHESTNUT_CLOUD_SEND_TIMEOUT="10"
+CHESTNUT_CLOUD_RESPONSE_TIMEOUT="60"
+```
+
+当浏览器持续发送语音但百炼长时间没有返回任何事件时，服务端会主动结束异常连接；Web 和微信小程序客户端会使用指数退避自动重连。
 
 ## 会议稿
 

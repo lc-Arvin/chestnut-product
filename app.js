@@ -49,6 +49,13 @@ let connectingRealtime = false;
 let meetingStartedAt;
 let meetingRecords = [];
 let isPaused = false;
+let reconnectTimer;
+let reconnectAttempts = 0;
+let droppedAudioFrames = 0;
+let stoppingMeeting = false;
+
+const MAX_SOCKET_BUFFER_BYTES = 512 * 1024;
+const MAX_DROPPED_AUDIO_FRAMES = 240;
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
@@ -205,6 +212,8 @@ function appendCaption(text, language, role) {
 
 function handleRealtimeEvent(event) {
   if (event.type === "session.updated") {
+    reconnectAttempts = 0;
+    droppedAudioFrames = 0;
     if (isPaused) {
       setConnectionState("paused", "Paused · Microphone muted");
     } else {
@@ -264,6 +273,17 @@ function startPcmStreaming() {
   silentOutput.gain.value = 0;
   audioProcessor.onaudioprocess = ({ inputBuffer }) => {
     if (bailianSocket?.readyState === WebSocket.OPEN) {
+      if (bailianSocket.bufferedAmount > MAX_SOCKET_BUFFER_BYTES) {
+        droppedAudioFrames += 1;
+        if (droppedAudioFrames === 1) {
+          setConnectionState("connecting", "Translation connection is congested · Recovering…");
+        }
+        if (droppedAudioFrames >= MAX_DROPPED_AUDIO_FRAMES) {
+          bailianSocket.close(1013, "Audio backpressure");
+        }
+        return;
+      }
+      droppedAudioFrames = 0;
       bailianSocket.send(downsampleToPcm16(inputBuffer.getChannelData(0), inputBuffer.sampleRate));
     }
   };
@@ -282,30 +302,52 @@ function stopPcmStreaming() {
   silentOutput = undefined;
 }
 
+function scheduleRealtimeReconnect() {
+  if (reconnectTimer || stoppingMeeting || isPaused || !microphoneStream?.active || !screens.live.classList.contains("is-active")) return;
+  const delay = Math.min(1000 * (2 ** reconnectAttempts), 10000);
+  reconnectAttempts += 1;
+  setConnectionState("connecting", `Translation disconnected · Reconnecting in ${Math.ceil(delay / 1000)}s…`);
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = undefined;
+    connectBailian();
+  }, delay);
+}
+
 function connectBailian() {
   if (connectingRealtime || !microphoneStream?.active) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
   connectingRealtime = true;
   stopPcmStreaming();
-  bailianSocket?.close();
+  const previousSocket = bailianSocket;
+  bailianSocket = undefined;
+  previousSocket?.close();
   setConnectionState("connecting", "Connecting to Bailian live translation…");
 
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  bailianSocket = new WebSocket(`${scheme}://${location.host}/ws`);
-  bailianSocket.addEventListener("message", ({ data }) => {
+  const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+  bailianSocket = socket;
+  socket.addEventListener("message", ({ data }) => {
+    if (bailianSocket !== socket) return;
     try { handleRealtimeEvent(JSON.parse(data)); } catch { /* Ignore malformed service events. */ }
   });
-  bailianSocket.addEventListener("open", () => { connectingRealtime = false; });
-  bailianSocket.addEventListener("error", () => {
+  socket.addEventListener("open", () => {
+    if (bailianSocket !== socket) return;
     connectingRealtime = false;
-    setConnectionState("error", "Could not reach the local Bailian service. Restart Chestnut, then reconnect.");
   });
-  bailianSocket.addEventListener("close", () => {
+  socket.addEventListener("error", () => {
+    if (bailianSocket !== socket) return;
+    connectingRealtime = false;
+    setConnectionState("connecting", "Live translation connection failed · Recovering…");
+  });
+  socket.addEventListener("close", () => {
+    if (bailianSocket !== socket) return;
     connectingRealtime = false;
     stopPcmStreaming();
     if (isPaused && screens.live.classList.contains("is-active")) {
       setConnectionState("paused", "Paused · Connection will resume when needed");
-    } else if (screens.live.classList.contains("is-active") && !connectionStatus.classList.contains("is-error")) {
-      setConnectionState("error", "Live translation disconnected. Please reconnect.");
+    } else if (screens.live.classList.contains("is-active")) {
+      scheduleRealtimeReconnect();
     }
   });
 }
@@ -325,6 +367,8 @@ function togglePause() {
   updatePauseState();
 
   if (isPaused) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
     stopPcmStreaming();
     setConnectionState("paused", "Paused · Microphone muted");
   } else if (bailianSocket?.readyState === WebSocket.OPEN) {
@@ -337,6 +381,11 @@ function togglePause() {
 
 async function beginMeeting() {
   clearInterval(meetingInterval);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  reconnectAttempts = 0;
+  droppedAudioFrames = 0;
+  stoppingMeeting = false;
   meetingSeconds = 0;
   isPaused = false;
   updatePauseState();
@@ -405,19 +454,37 @@ async function saveMeetingTranscript() {
 }
 
 async function stopMeeting() {
+  stoppingMeeting = true;
   clearInterval(meetingInterval);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
   meetingInterval = undefined;
   capturePendingCaption(englishCurrent, "en");
   capturePendingCaption(chineseCurrent, "zh");
   stopPcmStreaming();
-  if (bailianSocket?.readyState === WebSocket.OPEN) bailianSocket.send(JSON.stringify({ type: "session.finish" }));
-  bailianSocket?.close();
+  const socket = bailianSocket;
   bailianSocket = undefined;
   isPaused = false;
   updatePauseState();
   releaseMicrophone();
   showScreen("setup");
+  if (socket?.readyState === WebSocket.OPEN) {
+    await new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        socket.close();
+        resolve();
+      }, 6000);
+      socket.addEventListener("close", () => {
+        clearTimeout(timeout);
+        resolve();
+      }, { once: true });
+      socket.send(JSON.stringify({ type: "session.finish" }));
+    });
+  } else {
+    socket?.close();
+  }
   await saveMeetingTranscript();
+  stoppingMeeting = false;
 }
 
 startButton.addEventListener("click", beginAudioCheck);
