@@ -127,6 +127,37 @@ POST /api/meetings  保存会议稿
 
 按提示输入 Bucket、地域和凭证。SecretKey 使用隐藏输入，不会写入文件或终端历史。脚本不会打印 SecretKey，只会在 `meetings/_diagnostics/` 写入一个可安全删除的小文件。
 
+## Web 私测访问控制
+
+公网 Web 服务建议先使用邀请码保护。在云托管服务中配置：
+
+```text
+CHESTNUT_WEB_INVITE_CODES="customer-a=code-for-customer-a,customer-b=code-for-customer-b"
+CHESTNUT_AUTH_SECRET="至少32字符、随机生成并长期保持不变的签名密钥"
+CHESTNUT_WEB_TOKEN_TTL_SECONDS="43200"
+CHESTNUT_MAX_MEETING_SECONDS="3600"
+CHESTNUT_MEETING_WARNING_SECONDS="300"
+CHESTNUT_MAX_CONCURRENT_MEETINGS="20"
+CHESTNUT_ALLOWED_ORIGINS="https://your-web-domain.example"
+```
+
+配置邀请码后，Web 用户必须先验证才能连接实时翻译或保存会议稿。服务通过 `HttpOnly` Cookie 保存有时效的签名凭证，凭证不会出现在 WebSocket URL 中，页面脚本也无法读取。API Key 和签名密钥都不会进入前端。不同浏览器会得到独立用户标识，会议稿按标识隔离。
+
+`CHESTNUT_MAX_MEETING_SECONDS` 是单场会议的服务端时间上限，默认 `3600` 秒；设为 `0` 表示不限制。`CHESTNUT_MEETING_WARNING_SECONDS` 控制结束前多少秒显示倒计时提醒。邀请码推荐使用 `客户标签=真实邀请码` 格式，会议稿文件名会使用客户标签，例如 `web-2026-09-05-customer-a-143022.md`，不会泄露真实邀请码。服务达到 `CHESTNUT_MAX_CONCURRENT_MEETINGS` 配置的并发数量后会拒绝新会议。同一用户只能进行一场会议，同一场会议的网络重连会替换旧连接。
+
+登录和 WebSocket 建连频率分别通过以下变量控制：
+
+```text
+CHESTNUT_LOGIN_RATE_LIMIT="5"
+CHESTNUT_LOGIN_RATE_WINDOW_SECONDS="600"
+CHESTNUT_CONNECTION_RATE_LIMIT="10"
+CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS="60"
+```
+
+当前并发登记和频率限制保存在单个服务实例内。私测阶段应将云托管最大实例数设为 `1`；正式横向扩容前，需要迁移到 Redis 等共享状态服务。
+
+未配置 `CHESTNUT_WEB_INVITE_CODES` 时，服务保持原有本地开发模式，不显示邀请码页面。微信小程序继续通过云托管注入的 `x-wx-openid` 识别用户，不使用 Web 邀请码。
+
 ## 安全说明
 
 - 不要将 API Key 写入源码或提交到 Git。

@@ -7,15 +7,19 @@ The same single-port service runs locally and in WeChat CloudBase Run.
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
 import secrets
 import time
-from collections import Counter
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 from qcloud_cos import CosConfig, CosS3Client
@@ -33,6 +37,111 @@ COS_REGION = os.environ.get("TENCENTCLOUD_REGION", os.environ.get("CHESTNUT_COS_
 LOG_PATH = Path(os.environ.get("CHESTNUT_LOG_FILE", ROOT / "logs" / "chestnut.log"))
 CLOUD_SEND_TIMEOUT_SECONDS = float(os.environ.get("CHESTNUT_CLOUD_SEND_TIMEOUT", "10"))
 CLOUD_RESPONSE_TIMEOUT_SECONDS = float(os.environ.get("CHESTNUT_CLOUD_RESPONSE_TIMEOUT", "60"))
+def safe_invite_label(value, code=""):
+    label = "".join(character.lower() for character in str(value or "") if character.isalnum() or character in "-_")
+    if label:
+        return label[:40]
+    digest = hashlib.sha256(str(code or value or "invite").encode()).hexdigest()[:8]
+    return f"invite-{digest}"
+
+
+def parse_web_invitations(value):
+    invitations = []
+    for item in str(value or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" in item:
+            configured_label, code = item.split("=", 1)
+            code = code.strip()
+            if not code:
+                continue
+            label = safe_invite_label(configured_label, code)
+        else:
+            code = item
+            label = safe_invite_label("", code)
+        invitations.append((label, code))
+    return tuple(invitations)
+
+
+WEB_INVITATIONS = parse_web_invitations(os.environ.get("CHESTNUT_WEB_INVITE_CODES", ""))
+AUTH_SECRET = os.environ.get("CHESTNUT_AUTH_SECRET", "").strip()
+AUTH_REQUIRED = bool(WEB_INVITATIONS)
+WEB_TOKEN_TTL_SECONDS = int(os.environ.get("CHESTNUT_WEB_TOKEN_TTL_SECONDS", "43200"))
+MAX_MEETING_SECONDS = int(os.environ.get("CHESTNUT_MAX_MEETING_SECONDS", "3600"))
+MEETING_WARNING_SECONDS = int(os.environ.get("CHESTNUT_MEETING_WARNING_SECONDS", "300"))
+MAX_CONCURRENT_MEETINGS = int(os.environ.get("CHESTNUT_MAX_CONCURRENT_MEETINGS", "20"))
+LOGIN_RATE_LIMIT = int(os.environ.get("CHESTNUT_LOGIN_RATE_LIMIT", "5"))
+LOGIN_RATE_WINDOW_SECONDS = int(os.environ.get("CHESTNUT_LOGIN_RATE_WINDOW_SECONDS", "600"))
+CONNECTION_RATE_LIMIT = int(os.environ.get("CHESTNUT_CONNECTION_RATE_LIMIT", "10"))
+CONNECTION_RATE_WINDOW_SECONDS = int(os.environ.get("CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS", "60"))
+ALLOWED_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.environ.get("CHESTNUT_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+)
+
+
+@dataclass(frozen=True)
+class ClientIdentity:
+    subject: str
+    kind: str
+    label: str = ""
+
+
+class SlidingWindowLimiter:
+    def __init__(self, limit, window_seconds):
+        self.limit = max(0, limit)
+        self.window_seconds = max(1, window_seconds)
+        self.attempts = defaultdict(deque)
+
+    def allow(self, key):
+        if not self.limit:
+            return True
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        entries = self.attempts[key]
+        while entries and entries[0] <= cutoff:
+            entries.popleft()
+        if len(entries) >= self.limit:
+            return False
+        entries.append(now)
+        return True
+
+
+class MeetingRegistry:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.active = {}
+
+    async def acquire(self, identity, meeting_id, socket):
+        session_key = secrets.token_hex(8)
+        previous = None
+        async with self.lock:
+            existing = self.active.get(identity.subject)
+            if existing and existing["meeting_id"] != meeting_id:
+                return None, None, "This account already has an active meeting."
+            if not existing and MAX_CONCURRENT_MEETINGS and len(self.active) >= MAX_CONCURRENT_MEETINGS:
+                return None, None, "Chestnut is currently at capacity. Please try again shortly."
+            if existing:
+                previous = existing["socket"]
+            self.active[identity.subject] = {
+                "session_key": session_key,
+                "meeting_id": meeting_id,
+                "socket": socket,
+            }
+        return session_key, previous, None
+
+    async def release(self, identity, session_key):
+        async with self.lock:
+            existing = self.active.get(identity.subject)
+            if existing and existing["session_key"] == session_key:
+                self.active.pop(identity.subject, None)
+
+
+LOGIN_LIMITER = SlidingWindowLimiter(LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS)
+CONNECTION_LIMITER = SlidingWindowLimiter(CONNECTION_RATE_LIMIT, CONNECTION_RATE_WINDOW_SECONDS)
+MEETING_REGISTRY = MeetingRegistry()
 
 
 def configure_logging():
@@ -63,6 +172,95 @@ def configure_logging():
 
 
 LOGGER = configure_logging()
+
+
+def base64url_encode(value):
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def base64url_decode(value):
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(f"{value}{padding}")
+
+
+def token_signature(payload):
+    return base64url_encode(hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).digest())
+
+
+def issue_access_token(client_id, invite_label="invite"):
+    now = int(time.time())
+    subject_digest = hmac.new(AUTH_SECRET.encode(), client_id.encode(), hashlib.sha256).hexdigest()[:32]
+    payload = base64url_encode(json.dumps({
+        "sub": f"web-{subject_digest}",
+        "kind": "web",
+        "label": safe_invite_label(invite_label),
+        "iat": now,
+        "exp": now + WEB_TOKEN_TTL_SECONDS,
+    }, separators=(",", ":")).encode())
+    return f"{payload}.{token_signature(payload)}"
+
+
+def verify_access_token(token):
+    if not token or not AUTH_SECRET:
+        return None
+    try:
+        payload, signature = token.split(".", 1)
+        if not hmac.compare_digest(signature, token_signature(payload)):
+            return None
+        claims = json.loads(base64url_decode(payload))
+        if int(claims.get("exp", 0)) <= int(time.time()):
+            return None
+        subject = safe_owner_id(claims.get("sub"))
+        if not subject or claims.get("kind") != "web":
+            return None
+        return ClientIdentity(subject=subject, kind="web", label=safe_invite_label(claims.get("label")))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def request_ip(request):
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    return forwarded or request.remote or "unknown"
+
+
+def request_token(request):
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return request.cookies.get("chestnut_access", "").strip()
+
+
+def request_identity(request):
+    wechat_openid = request.headers.get("x-wx-openid", "").strip()
+    if wechat_openid:
+        return ClientIdentity(subject=f"wechat-{safe_owner_id(wechat_openid)}", kind="wechat")
+    identity = verify_access_token(request_token(request))
+    if identity:
+        return identity
+    if not AUTH_REQUIRED:
+        return ClientIdentity(subject="local-anonymous", kind="local")
+    return None
+
+
+def origin_is_allowed(request):
+    origin = request.headers.get("origin", "").strip().rstrip("/")
+    if not origin:
+        return True
+    if ALLOWED_ORIGINS:
+        return origin in ALLOWED_ORIGINS
+    try:
+        return urlsplit(origin).netloc == request.host
+    except ValueError:
+        return False
+
+
+def invitation_label(candidate):
+    candidate = str(candidate or "")
+    matched_label = None
+    for label, configured_code in WEB_INVITATIONS:
+        if hmac.compare_digest(candidate, configured_code):
+            matched_label = label
+    return matched_label
 
 
 class SessionMetrics:
@@ -124,13 +322,16 @@ def markdown_quote(text):
     return "\n".join(f"> {line}" if line else ">" for line in str(text).splitlines())
 
 
-def render_meeting_transcript(payload):
+def render_meeting_transcript(payload, filename_label=""):
     entries = payload.get("entries", [])
     if not isinstance(entries, list):
         raise ValueError("entries must be a list")
 
     now = datetime.now().astimezone()
-    filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}.md"
+    if filename_label:
+        filename = f"web-{now.strftime('%Y-%m-%d')}-{safe_invite_label(filename_label)}-{now.strftime('%H%M%S')}.md"
+    else:
+        filename = f"meeting-{now.strftime('%Y%m%d-%H%M%S')}.md"
     started_at = str(payload.get("started_at") or "")
     ended_at = str(payload.get("ended_at") or now.isoformat())
     duration = max(0, int(payload.get("duration_seconds") or 0))
@@ -172,9 +373,10 @@ def safe_owner_id(value):
     return owner[:128] or "anonymous"
 
 
-def save_local_transcript(filename, content):
-    meetings_dir = ROOT / "meetings"
-    meetings_dir.mkdir(exist_ok=True)
+def save_local_transcript(filename, content, owner_id):
+    owner = safe_owner_id(owner_id)
+    meetings_dir = ROOT / "meetings" if owner == "local-anonymous" else ROOT / "meetings" / owner
+    meetings_dir.mkdir(parents=True, exist_ok=True)
     output_path = meetings_dir / filename
     suffix = 2
     while output_path.exists():
@@ -183,7 +385,11 @@ def save_local_transcript(filename, content):
     temporary_path = output_path.with_suffix(".tmp")
     temporary_path.write_text(content, encoding="utf-8")
     temporary_path.replace(output_path)
-    return {"filename": output_path.name, "storage": "local", "url": f"/meetings/{output_path.name}"}
+    return {
+        "filename": output_path.name,
+        "storage": "local",
+        "url": f"/meetings/{owner}/{output_path.name}",
+    }
 
 
 def save_cos_transcript(filename, content, owner_id):
@@ -212,11 +418,11 @@ def save_cos_transcript(filename, content, owner_id):
     return {"filename": filename, "storage": "cos", "object_key": object_key}
 
 
-def save_meeting_transcript(payload, owner_id=""):
-    filename, content = render_meeting_transcript(payload)
+def save_meeting_transcript(payload, owner_id="", filename_label=""):
+    filename, content = render_meeting_transcript(payload, filename_label)
     if COS_BUCKET:
         return save_cos_transcript(filename, content, owner_id)
-    return save_local_transcript(filename, content)
+    return save_local_transcript(filename, content, owner_id)
 
 
 class AiohttpSocket:
@@ -348,6 +554,30 @@ async def monitor_cloud_responsiveness(metrics):
             raise TimeoutError("Bailian stopped responding while speech audio was still arriving")
 
 
+async def enforce_meeting_duration(browser, metrics):
+    warning_seconds = min(MEETING_WARNING_SECONDS, MAX_MEETING_SECONDS)
+    if warning_seconds > 0:
+        await asyncio.sleep(MAX_MEETING_SECONDS - warning_seconds)
+        await browser.send(json.dumps({
+            "type": "meeting.limit_warning",
+            "remaining_seconds": warning_seconds,
+            "message": "This meeting is ending soon.",
+        }))
+        await asyncio.sleep(warning_seconds)
+    else:
+        await asyncio.sleep(MAX_MEETING_SECONDS)
+    LOGGER.info(
+        "session=%s event=meeting_limit_reached limit_s=%d",
+        metrics.session_id,
+        MAX_MEETING_SECONDS,
+    )
+    await browser.send(json.dumps({
+        "type": "meeting.limit_reached",
+        "limit_seconds": MAX_MEETING_SECONDS,
+        "message": "Meeting time limit reached · Saving transcript…",
+    }))
+
+
 def session_update(target_language, include_transcription):
     return {
         "event_id": f"session_{target_language}_{os.urandom(8).hex()}",
@@ -372,7 +602,7 @@ def session_update(target_language, include_transcription):
     }
 
 
-async def handle_browser(browser):
+async def handle_browser(browser, meeting_limit_enabled=True):
     metrics = SessionMetrics()
     LOGGER.info("session=%s event=browser_connected", metrics.session_id)
     api_key = os.environ.get("DASHSCOPE_API_KEY")
@@ -453,8 +683,16 @@ async def handle_browser(browser):
                     monitor_cloud_responsiveness(metrics),
                     name=f"watchdog-{metrics.session_id}",
                 )
+                duration_limit = None
+                if meeting_limit_enabled and MAX_MEETING_SECONDS > 0:
+                    duration_limit = asyncio.create_task(
+                        enforce_meeting_duration(browser, metrics),
+                        name=f"duration-limit-{metrics.session_id}",
+                    )
                 cloud_tasks = {chinese_to_browser, english_to_browser}
                 all_tasks = {browser_to_cloud, *cloud_tasks, watchdog}
+                if duration_limit:
+                    all_tasks.add(duration_limit)
                 done, pending = await asyncio.wait(
                     all_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
@@ -472,6 +710,8 @@ async def handle_browser(browser):
                 await asyncio.gather(*all_tasks, return_exceptions=True)
                 for task in done:
                     if task is browser_to_cloud and browser_finished_session:
+                        continue
+                    if task is duration_limit:
                         continue
                     if task in cloud_tasks and task.exception() is None:
                         LOGGER.warning(
@@ -525,25 +765,117 @@ async def health_handler(_request):
     return web.json_response({"status": "ok", "service": "chestnut-api"})
 
 
+async def auth_status_handler(request):
+    return web.json_response({
+        "auth_required": AUTH_REQUIRED,
+        "authenticated": request_identity(request) is not None,
+        "max_meeting_seconds": MAX_MEETING_SECONDS,
+        "meeting_warning_seconds": MEETING_WARNING_SECONDS,
+    })
+
+
+async def invite_auth_handler(request):
+    ip = request_ip(request)
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
+    if not LOGIN_LIMITER.allow(ip):
+        LOGGER.warning("event=invite_rate_limited ip=%s", ip)
+        return web.json_response({"error": "Too many attempts. Please wait before trying again."}, status=429)
+    if not AUTH_REQUIRED:
+        return web.json_response({"auth_required": False})
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, TypeError):
+        return web.json_response({"error": "Invalid request."}, status=400)
+    code = payload.get("code", "")
+    client_id = str(payload.get("client_id", "")).strip()
+    invite_label = invitation_label(code)
+    if len(client_id) < 8 or len(client_id) > 200 or not invite_label:
+        LOGGER.warning("event=invite_rejected ip=%s", ip)
+        return web.json_response({"error": "Invitation code not accepted."}, status=401)
+    token = issue_access_token(client_id, invite_label)
+    LOGGER.info("event=invite_accepted ip=%s", ip)
+    response = web.json_response({"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS})
+    forwarded_scheme = request.headers.get("x-forwarded-proto", request.scheme).split(",", 1)[0].strip()
+    response.set_cookie(
+        "chestnut_access",
+        token,
+        max_age=WEB_TOKEN_TTL_SECONDS,
+        httponly=True,
+        secure=forwarded_scheme == "https",
+        samesite="Strict",
+        path="/",
+    )
+    return response
+
+
+async def logout_handler(request):
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
+    response = web.json_response({"authenticated": False})
+    response.del_cookie("chestnut_access", path="/")
+    return response
+
+
 async def websocket_handler(request):
+    ip = request_ip(request)
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
     socket = web.WebSocketResponse(max_msg_size=0, heartbeat=10)
     await socket.prepare(request)
-    await handle_browser(AiohttpSocket(socket))
-    if not socket.closed:
-        await socket.close()
+    browser = AiohttpSocket(socket)
+    identity = request_identity(request)
+    if not identity:
+        await browser.send(json.dumps({
+            "type": "access.denied",
+            "error": {"message": "Your access has expired. Enter the invitation code again."},
+        }))
+        await socket.close(code=1008, message=b"Authentication required")
+        return socket
+    if not CONNECTION_LIMITER.allow(f"{identity.subject}:{ip}"):
+        await browser.send(json.dumps({
+            "type": "connection.rate_limited",
+            "message": "Too many connection attempts. Please wait and try again.",
+        }))
+        await socket.close(code=1008, message=b"Rate limited")
+        return socket
+
+    meeting_id = safe_owner_id(request.query.get("meeting_id"))
+    session_key, previous_socket, error = await MEETING_REGISTRY.acquire(identity, meeting_id, browser)
+    if error:
+        await browser.send(json.dumps({"type": "meeting.rejected", "message": error}))
+        await socket.close(code=1008, message=b"Meeting unavailable")
+        return socket
+    if previous_socket:
+        await previous_socket.close()
+    LOGGER.info("event=meeting_admitted owner=%s kind=%s meeting=%s", identity.subject, identity.kind, meeting_id)
+    try:
+        # Web preview meetings use the configurable time limit. Keep the
+        # already-published Mini Program behavior unchanged until its UI can
+        # present the warning and complete an expired meeting gracefully.
+        await handle_browser(browser, meeting_limit_enabled=identity.kind == "web")
+    finally:
+        await MEETING_REGISTRY.release(identity, session_key)
+        if not socket.closed:
+            await socket.close()
     return socket
 
 
 async def save_meeting_handler(request):
     try:
+        if not origin_is_allowed(request):
+            raise web.HTTPForbidden(text="Origin not allowed")
+        identity = request_identity(request)
+        if not identity:
+            return web.json_response({"error": "Authentication required."}, status=401)
         if request.content_length is not None and request.content_length > MAX_TRANSCRIPT_BYTES:
             raise ValueError("Invalid transcript size")
         raw = await request.read()
         if not raw or len(raw) > MAX_TRANSCRIPT_BYTES:
             raise ValueError("Invalid transcript size")
         payload = json.loads(raw)
-        owner_id = request.headers.get("x-wx-openid", "")
-        saved = await asyncio.to_thread(save_meeting_transcript, payload, owner_id)
+        filename_label = identity.label if identity.kind == "web" else ""
+        saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
         LOGGER.info(
             "event=transcript_saved storage=%s entries=%d filename=%s",
             saved["storage"],
@@ -553,6 +885,8 @@ async def save_meeting_handler(request):
         return web.json_response(saved, status=201)
     except (ValueError, TypeError, json.JSONDecodeError) as error:
         return web.json_response({"error": str(error)}, status=400)
+    except web.HTTPException:
+        raise
     except Exception as error:
         LOGGER.exception("event=transcript_save_failed error_type=%s", type(error).__name__)
         return web.json_response({"error": "会议稿云端保存失败，请稍后重试"}, status=503)
@@ -570,19 +904,45 @@ async def static_handler(request):
 
 
 async def meeting_file_handler(request):
+    identity = request_identity(request)
+    if not identity:
+        raise web.HTTPUnauthorized(text="Authentication required")
+    owner = safe_owner_id(request.match_info["owner"])
+    if owner != safe_owner_id(identity.subject):
+        raise web.HTTPForbidden(text="This transcript belongs to another account")
     filename = Path(request.match_info["filename"]).name
-    candidate = (ROOT / "meetings" / filename).resolve()
-    if candidate.parent != (ROOT / "meetings").resolve() or not candidate.is_file():
+    owner_dir = (
+        ROOT / "meetings" if owner == "local-anonymous" else ROOT / "meetings" / owner
+    ).resolve()
+    candidate = (owner_dir / filename).resolve()
+    if candidate.parent != owner_dir or not candidate.is_file():
         raise web.HTTPNotFound()
     return web.FileResponse(candidate, headers={"Cache-Control": "no-store"})
 
 
+def validate_configuration():
+    if AUTH_REQUIRED and len(AUTH_SECRET) < 32:
+        raise RuntimeError("CHESTNUT_AUTH_SECRET must contain at least 32 characters when Web authentication is enabled")
+    if AUTH_REQUIRED and WEB_TOKEN_TTL_SECONDS <= 0:
+        raise RuntimeError("CHESTNUT_WEB_TOKEN_TTL_SECONDS must be greater than zero")
+    if MAX_MEETING_SECONDS < 0:
+        raise RuntimeError("CHESTNUT_MAX_MEETING_SECONDS must be zero or greater")
+    if MEETING_WARNING_SECONDS < 0:
+        raise RuntimeError("CHESTNUT_MEETING_WARNING_SECONDS must be zero or greater")
+    if MAX_CONCURRENT_MEETINGS < 0:
+        raise RuntimeError("CHESTNUT_MAX_CONCURRENT_MEETINGS must be zero or greater")
+
+
 def create_app():
+    validate_configuration()
     app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES)
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/api/auth/status", auth_status_handler)
+    app.router.add_post("/api/auth/invite", invite_auth_handler)
+    app.router.add_post("/api/auth/logout", logout_handler)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_post("/api/meetings", save_meeting_handler)
-    app.router.add_get("/meetings/{filename}", meeting_file_handler)
+    app.router.add_get("/meetings/{owner}/{filename}", meeting_file_handler)
     app.router.add_get("/{path:.*}", static_handler)
     return app
 

@@ -8,6 +8,34 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <section class="access-gate" id="access-gate" aria-labelledby="access-title" hidden>
+      <form class="access-card" id="access-form">
+        <span class="brand-mark access-mark" aria-hidden="true">✦</span>
+        <div class="eyebrow">Private Preview</div>
+        <h1 id="access-title">Welcome to ChestnutOne</h1>
+        <p class="intro">Enter your invitation code to open the conference console.</p>
+        <label class="access-field">
+          <span>Invitation code</span>
+          <span class="access-input-wrap">
+            <input id="invite-code" name="invite-code" type="password" autocomplete="one-time-code" required />
+            <button class="invite-visibility-button" id="invite-visibility-button" type="button" aria-label="Show invitation code" aria-pressed="false">
+              <svg class="eye-icon eye-icon-visible" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                <circle cx="12" cy="12" r="2.7" />
+              </svg>
+              <svg class="eye-icon eye-icon-hidden" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 3 21 21" />
+                <path d="M10.6 6.1A10.5 10.5 0 0 1 12 6c6 0 9.5 6 9.5 6a16.4 16.4 0 0 1-2.7 3.4M6.2 6.3C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a9.8 9.8 0 0 0 3-.5" />
+                <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+              </svg>
+            </button>
+          </span>
+        </label>
+        <p class="access-error" id="access-error" role="alert" hidden></p>
+        <button class="primary-button" id="access-button" type="submit">Continue <span aria-hidden="true">→</span></button>
+      </form>
+    </section>
+
     <main class="app-shell">
       <header class="brand" aria-label="Chestnut Conference Console">
         <span class="brand-mark" aria-hidden="true">✦</span>
@@ -54,7 +82,7 @@
             </div>
           </div>
 
-          <button class="primary-button" id="start-button" type="button">
+          <button class="primary-button" id="start-button" type="button" disabled>
             Start Meeting <span aria-hidden="true">→</span>
           </button>
           <div class="meeting-save-notice" id="meeting-save-notice" hidden>
@@ -113,6 +141,11 @@
                 </button>
               </div>
             </div>
+          </div>
+
+          <div class="meeting-warning" id="meeting-warning" role="status" hidden>
+            <span>This meeting is ending soon. Your transcript will be saved automatically.</span>
+            <strong id="meeting-warning-time">05:00</strong>
           </div>
 
           <div class="caption-grid" aria-live="polite" aria-atomic="false">

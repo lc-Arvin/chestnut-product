@@ -12,6 +12,26 @@
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.09);
 }
 
+.access-gate { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: rgba(245,245,247,.88); backdrop-filter: blur(24px); }
+.access-gate[hidden] { display: none; }
+.access-card { width: min(100%, 430px); padding: 42px; text-align: center; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 28px; box-shadow: 0 24px 80px rgba(0,0,0,.12); }
+.access-card h1 { margin: 14px 0 8px; font-size: clamp(28px, 5vw, 40px); letter-spacing: -.045em; }
+.access-card .access-mark { display: grid; width: 48px; height: 48px; margin: 0 auto 24px; place-items: center; border-radius: 14px; }
+.access-field { display: grid; gap: 8px; margin: 28px 0 14px; text-align: left; color: var(--muted); font-size: 12px; font-weight: 650; }
+.access-field input { width: 100%; height: 50px; padding: 0 15px; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 13px; outline: none; font: inherit; font-size: 16px; }
+.access-field input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(0,113,227,.1); }
+.access-input-wrap { position: relative; display: block; }
+.access-input-wrap input { padding-right: 52px; }
+.invite-visibility-button { position: absolute; top: 5px; right: 5px; display: grid; width: 40px; height: 40px; place-items: center; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
+.invite-visibility-button:hover { color: var(--text); background: rgba(0,0,0,.045); }
+.invite-visibility-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.eye-icon { grid-area: 1 / 1; width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.eye-icon-visible { display: none; }
+.invite-visibility-button[aria-pressed="true"] .eye-icon-visible { display: block; }
+.invite-visibility-button[aria-pressed="true"] .eye-icon-hidden { display: none; }
+.access-error { margin: 0 0 14px; color: var(--red); font-size: 13px; }
+.access-card .primary-button { width: 100%; }
+
 * { box-sizing: border-box; }
 
 body {
@@ -170,6 +190,7 @@ select {
 .primary-button { color: white; background: var(--blue); }
 .primary-button:hover { background: var(--blue-hover); }
 .primary-button:active, .pause-button:active, .stop-button:active { transform: scale(.985); }
+.primary-button:disabled, .primary-button:disabled:hover, .primary-button:disabled:active { background: var(--blue); cursor: not-allowed; opacity: .5; transform: none; }
 .primary-button:focus-visible, .pause-button:focus-visible, .stop-button:focus-visible, select:focus-visible { outline: 3px solid rgba(0, 113, 227, .25); outline-offset: 3px; }
 .meeting-save-notice { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 16px; padding: 13px 15px; color: var(--muted); background: rgba(34,165,89,.07); border: 1px solid rgba(34,165,89,.13); border-radius: 14px; font-size: 13px; text-align: left; }
 .meeting-save-notice[hidden] { display: none; }
@@ -225,6 +246,9 @@ select {
 .live-pill #live-state-label { width: auto; height: auto; border-radius: 0; background: transparent; animation: none; }
 .live-pill.is-paused { color: #9b6900; background: rgba(230,162,60,.13); }
 .live-pill.is-paused > span:first-child { animation: none; }
+.meeting-warning { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 0 0 10px; padding: 9px 14px; color: #704900; background: #fff4d6; border: 1px solid rgba(155,105,0,.18); border-radius: 12px; font-size: 13px; }
+.meeting-warning[hidden] { display: none; }
+.meeting-warning strong { white-space: nowrap; font-size: 15px; font-variant-numeric: tabular-nums; }
 @keyframes pulse { 50% { opacity: .35; } }
 .timer { font-size: 18px; font-weight: 520; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .connection-status { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; }
@@ -327,6 +351,7 @@ body.is-live .live-status { margin: 10px 0 0; }
   .live-status { align-items: flex-start; flex-direction: column; gap: 10px; }
   .connection-status { align-items: flex-start; }
   .live-topbar { flex-wrap: wrap; gap: 8px 10px; }
+  .meeting-warning { align-items: flex-start; justify-content: space-between; text-align: left; }
   .live-brand { flex: 1; }
   .live-session-status { order: 2; width: 100%; justify-content: flex-end; }
   .connection-status { order: 3; width: 100%; justify-content: flex-start; padding: 2px 3px 0; }

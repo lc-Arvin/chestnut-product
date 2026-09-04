@@ -4,6 +4,13 @@ const screens = {
   live: document.querySelector("#live-screen"),
 };
 
+const accessGate = document.querySelector("#access-gate");
+const accessForm = document.querySelector("#access-form");
+const accessButton = document.querySelector("#access-button");
+const accessError = document.querySelector("#access-error");
+const inviteCode = document.querySelector("#invite-code");
+const inviteVisibilityButton = document.querySelector("#invite-visibility-button");
+
 const startButton = document.querySelector("#start-button");
 const continueButton = document.querySelector("#continue-button");
 const pauseButton = document.querySelector("#pause-button");
@@ -32,6 +39,8 @@ const chineseCurrent = document.querySelector("#chinese-current");
 const meetingSaveNotice = document.querySelector("#meeting-save-notice");
 const meetingSaveMessage = document.querySelector("#meeting-save-message");
 const meetingFileLink = document.querySelector("#meeting-file-link");
+const meetingWarning = document.querySelector("#meeting-warning");
+const meetingWarningTime = document.querySelector("#meeting-warning-time");
 
 let countdownInterval;
 let meetingInterval;
@@ -53,10 +62,86 @@ let reconnectTimer;
 let reconnectAttempts = 0;
 let droppedAudioFrames = 0;
 let stoppingMeeting = false;
+let meetingId;
+let meetingFileUrl = "";
+let meetingWarningRemaining = 0;
 
 const MAX_SOCKET_BUFFER_BYTES = 512 * 1024;
 const MAX_DROPPED_AUDIO_FRAMES = 240;
 const MAX_VISIBLE_CAPTIONS_PER_LANGUAGE = 6;
+
+function createClientId() {
+  let clientId = window.localStorage.getItem("chestnut_client_id");
+  if (!clientId) {
+    clientId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem("chestnut_client_id", clientId);
+  }
+  return clientId;
+}
+
+function unlockConsole() {
+  accessGate.hidden = true;
+  startButton.disabled = false;
+}
+
+function lockConsole(message = "") {
+  startButton.disabled = true;
+  accessGate.hidden = false;
+  accessError.textContent = message;
+  accessError.hidden = !message;
+  window.setTimeout(() => inviteCode.focus(), 0);
+}
+
+async function initializeAccess() {
+  try {
+    const response = await fetch("/api/auth/status");
+    if (response.status === 404) {
+      unlockConsole();
+      return;
+    }
+    const status = await response.json();
+    if (!status.auth_required || status.authenticated) {
+      unlockConsole();
+    } else {
+      lockConsole();
+    }
+  } catch {
+    lockConsole("Chestnut could not reach the service. Please try again.");
+  }
+}
+
+async function submitInvitation(event) {
+  event.preventDefault();
+  accessButton.disabled = true;
+  accessError.hidden = true;
+  try {
+    const response = await fetch("/api/auth/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: inviteCode.value, client_id: createClientId() }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.authenticated) throw new Error(result.error || "Invitation code not accepted.");
+    inviteCode.value = "";
+    setInviteVisibility(false);
+    unlockConsole();
+  } catch (error) {
+    lockConsole(error.message || "Invitation code not accepted.");
+  } finally {
+    accessButton.disabled = false;
+  }
+}
+
+function setInviteVisibility(visible) {
+  inviteCode.type = visible ? "text" : "password";
+  inviteVisibilityButton.setAttribute("aria-pressed", String(visible));
+  inviteVisibilityButton.setAttribute("aria-label", visible ? "Hide invitation code" : "Show invitation code");
+}
+
+function toggleInviteVisibility() {
+  setInviteVisibility(inviteCode.type === "password");
+  inviteCode.focus();
+}
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.remove("is-active"));
@@ -164,6 +249,11 @@ function formatTime(totalSeconds) {
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
+function updateMeetingWarning() {
+  meetingWarning.hidden = meetingWarningRemaining <= 0;
+  meetingWarningTime.textContent = formatTime(meetingWarningRemaining).slice(3);
+}
+
 function setConnectionState(state, label) {
   connectionStatus.classList.toggle("is-connected", state === "connected");
   connectionStatus.classList.toggle("is-error", state === "error");
@@ -221,6 +311,49 @@ function appendCaption(text, language, role) {
 }
 
 function handleRealtimeEvent(event) {
+  if (event.type === "access.denied") {
+    stoppingMeeting = true;
+    stopPcmStreaming();
+    releaseMicrophone();
+    bailianSocket?.close();
+    bailianSocket = undefined;
+    showScreen("setup");
+    lockConsole(event.error?.message || "Your access has expired. Enter the invitation code again.");
+    return;
+  }
+
+  if (event.type === "connection.rate_limited") {
+    setConnectionState("connecting", event.message || "Too many connection attempts · Retrying shortly…");
+    return;
+  }
+
+  if (event.type === "meeting.rejected") {
+    stoppingMeeting = true;
+    clearInterval(meetingInterval);
+    stopPcmStreaming();
+    releaseMicrophone();
+    bailianSocket?.close();
+    bailianSocket = undefined;
+    showScreen("setup");
+    meetingSaveNotice.hidden = false;
+    meetingSaveNotice.classList.add("is-error");
+    meetingSaveMessage.textContent = event.message || "This meeting could not be started.";
+    meetingFileLink.hidden = true;
+    return;
+  }
+
+  if (event.type === "meeting.limit_reached") {
+    setConnectionState("error", event.message || "Meeting time limit reached · Saving transcript…");
+    stopMeeting({ requireReauth: true });
+    return;
+  }
+
+  if (event.type === "meeting.limit_warning") {
+    meetingWarningRemaining = Math.max(0, Number(event.remaining_seconds) || 0);
+    updateMeetingWarning();
+    return;
+  }
+
   if (event.type === "session.updated") {
     reconnectAttempts = 0;
     droppedAudioFrames = 0;
@@ -335,7 +468,8 @@ function connectBailian() {
   setConnectionState("connecting", "Connecting to Bailian live translation…");
 
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+  const query = new URLSearchParams({ meeting_id: meetingId || "web-meeting" });
+  const socket = new WebSocket(`${scheme}://${location.host}/ws?${query}`);
   bailianSocket = socket;
   socket.addEventListener("message", ({ data }) => {
     if (bailianSocket !== socket) return;
@@ -396,11 +530,15 @@ async function beginMeeting() {
   reconnectAttempts = 0;
   droppedAudioFrames = 0;
   stoppingMeeting = false;
+  meetingId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   meetingSeconds = 0;
   isPaused = false;
   updatePauseState();
   meetingStartedAt = new Date();
   meetingRecords = [];
+  meetingFileUrl = "";
+  meetingWarningRemaining = 0;
+  updateMeetingWarning();
   meetingSaveNotice.hidden = true;
   meetingTimer.textContent = "00:00:00";
   meetingTimer.dateTime = "PT0S";
@@ -414,6 +552,10 @@ async function beginMeeting() {
   showScreen("live");
 
   meetingInterval = window.setInterval(() => {
+    if (meetingWarningRemaining > 0) {
+      meetingWarningRemaining -= 1;
+      updateMeetingWarning();
+    }
     if (isPaused) return;
     meetingSeconds += 1;
     meetingTimer.textContent = formatTime(meetingSeconds);
@@ -445,6 +587,7 @@ async function saveMeetingTranscript() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        meeting_id: meetingId,
         started_at: meetingStartedAt?.toISOString(),
         ended_at: new Date().toISOString(),
         duration_seconds: meetingSeconds,
@@ -454,8 +597,9 @@ async function saveMeetingTranscript() {
     if (!response.ok) throw new Error(await response.text());
     const result = await response.json();
     meetingSaveMessage.textContent = `Transcript saved · ${result.filename}`;
-    meetingFileLink.href = result.url;
-    meetingFileLink.hidden = false;
+    meetingFileUrl = result.url || "";
+    meetingFileLink.href = meetingFileUrl || "#";
+    meetingFileLink.hidden = !meetingFileUrl;
   } catch (error) {
     meetingSaveNotice.classList.add("is-error");
     meetingSaveMessage.textContent = "Transcript could not be saved. Keep this window open and try stopping again.";
@@ -463,12 +607,15 @@ async function saveMeetingTranscript() {
   }
 }
 
-async function stopMeeting() {
+async function stopMeeting({ requireReauth = false } = {}) {
+  if (stoppingMeeting) return;
   stoppingMeeting = true;
   clearInterval(meetingInterval);
   clearTimeout(reconnectTimer);
   reconnectTimer = undefined;
   meetingInterval = undefined;
+  meetingWarningRemaining = 0;
+  updateMeetingWarning();
   capturePendingCaption(englishCurrent, "en");
   capturePendingCaption(chineseCurrent, "zh");
   stopPcmStreaming();
@@ -478,6 +625,9 @@ async function stopMeeting() {
   updatePauseState();
   releaseMicrophone();
   showScreen("setup");
+  if (requireReauth) {
+    lockConsole("This meeting reached its time limit. Enter your invitation code to start another meeting.");
+  }
   if (socket?.readyState === WebSocket.OPEN) {
     await new Promise((resolve) => {
       const timeout = window.setTimeout(() => {
@@ -494,11 +644,19 @@ async function stopMeeting() {
     socket?.close();
   }
   await saveMeetingTranscript();
+  if (requireReauth) {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch { /* The access gate still prevents another local start attempt. */ }
+  }
   stoppingMeeting = false;
 }
 
 startButton.addEventListener("click", beginAudioCheck);
+accessForm.addEventListener("submit", submitInvitation);
+inviteVisibilityButton.addEventListener("click", toggleInviteVisibility);
 continueButton.addEventListener("click", beginMeeting);
 pauseButton.addEventListener("click", togglePause);
-stopButton.addEventListener("click", stopMeeting);
+stopButton.addEventListener("click", () => stopMeeting());
 retryButton.addEventListener("click", connectBailian);
+initializeAccess();
