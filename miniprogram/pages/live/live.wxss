@@ -152,6 +152,27 @@
   line-height: 44rpx;
 }
 
+.meeting-warning {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 18rpx;
+  padding: 13rpx 18rpx;
+  color: #704900;
+  background: #fff4d6;
+  border: 1rpx solid rgba(155, 105, 0, 0.18);
+  border-radius: 18rpx;
+  font-size: 21rpx;
+}
+
+.meeting-warning-time {
+  flex: none;
+  font-size: 24rpx;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .caption-stack {
   display: grid;
   min-height: 0;
@@ -395,6 +416,17 @@
     padding: 0 9rpx;
     font-size: 15rpx;
     line-height: 36rpx;
+  }
+
+  .meeting-warning {
+    gap: 10rpx;
+    padding: 5rpx 12rpx;
+    border-radius: 11rpx;
+    font-size: 16rpx;
+  }
+
+  .meeting-warning-time {
+    font-size: 18rpx;
   }
 
   .caption-stack {

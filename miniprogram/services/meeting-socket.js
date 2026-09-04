@@ -117,6 +117,9 @@ class MeetingSocket {
 
   finish() {
     if (!this.task) return;
+    // A finished or expired meeting must never reconnect into a fresh server
+    // session after the current socket closes.
+    this.intentionalClose = true;
     this.task.send({ data: JSON.stringify({ type: "session.finish" }) });
   }
 

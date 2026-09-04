@@ -24,6 +24,8 @@ Page({
     chineseAnchor: "",
     showEnglishPlaceholder: true,
     showChinesePlaceholder: true,
+    meetingWarningVisible: false,
+    meetingWarningTime: "",
     safeTop: safeTopPadding(4),
   },
 
@@ -32,6 +34,7 @@ Page({
     this.readyForAudio = false;
     this.entrySequence = 0;
     this.finishedTargets = new Set();
+    this.meetingWarningRemaining = 0;
     this.unsubscribers = [
       this.socket.subscribe("state", (event) => this.handleConnectionState(event)),
       this.socket.subscribe("event", (event) => this.handleRealtimeEvent(event)),
@@ -70,6 +73,13 @@ Page({
 
   startTimer() {
     this.timerInterval = setInterval(() => {
+      if (this.meetingWarningRemaining > 0 && !this.data.ending) {
+        this.meetingWarningRemaining -= 1;
+        this.setData({
+          meetingWarningVisible: this.meetingWarningRemaining > 0,
+          meetingWarningTime: formatTime(this.meetingWarningRemaining).slice(3),
+        });
+      }
       if (this.data.isPaused || this.data.ending) return;
       meetingState.state.elapsedSeconds += 1;
       this.setData({ timer: formatTime(meetingState.state.elapsedSeconds) });
@@ -113,6 +123,21 @@ Page({
   },
 
   handleRealtimeEvent(event) {
+    if (event.type === "meeting.limit_warning") {
+      this.meetingWarningRemaining = Math.max(0, Number(event.remaining_seconds) || 0);
+      this.setData({
+        meetingWarningVisible: this.meetingWarningRemaining > 0,
+        meetingWarningTime: formatTime(this.meetingWarningRemaining).slice(3),
+      });
+      return;
+    }
+
+    if (event.type === "meeting.limit_reached") {
+      this.meetingWarningRemaining = 0;
+      this.stopMeeting("limit");
+      return;
+    }
+
     if (event.type === "session.updated") {
       this.readyForAudio = true;
       if (!this.data.isPaused) recorder.resume();
@@ -240,9 +265,18 @@ Page({
     this.socket.connect();
   },
 
-  stopMeeting() {
+  stopMeeting(trigger) {
     if (this.data.ending) return;
-    this.setData({ ending: true, connectionState: "finishing", connectionMessage: "正在完成最后一句并保存会议稿…" });
+    const limitReached = trigger === "limit";
+    this.meetingWarningRemaining = 0;
+    this.setData({
+      ending: true,
+      meetingWarningVisible: false,
+      connectionState: "finishing",
+      connectionMessage: limitReached
+        ? "会议已到达时长上限 · 正在保存会议稿…"
+        : "正在完成最后一句并保存会议稿…",
+    });
     clearInterval(this.timerInterval);
     this.readyForAudio = false;
     recorder.stop();

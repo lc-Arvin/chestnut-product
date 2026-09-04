@@ -130,6 +130,11 @@ class InvitationTests(unittest.TestCase):
 
 
 class DurationLimitTests(unittest.IsolatedAsyncioTestCase):
+    def test_limit_applies_to_web_and_wechat_but_not_local_desktop(self):
+        self.assertTrue(server.meeting_limit_applies_to(server.ClientIdentity("web-user", "web")))
+        self.assertTrue(server.meeting_limit_applies_to(server.ClientIdentity("wechat-user", "wechat")))
+        self.assertFalse(server.meeting_limit_applies_to(server.ClientIdentity("local-user", "local")))
+
     async def test_duration_limit_notifies_browser(self):
         class Browser:
             def __init__(self):

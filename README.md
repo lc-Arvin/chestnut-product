@@ -143,7 +143,7 @@ CHESTNUT_ALLOWED_ORIGINS="https://your-web-domain.example"
 
 配置邀请码后，Web 用户必须先验证才能连接实时翻译或保存会议稿。服务通过 `HttpOnly` Cookie 保存有时效的签名凭证，凭证不会出现在 WebSocket URL 中，页面脚本也无法读取。API Key 和签名密钥都不会进入前端。不同浏览器会得到独立用户标识，会议稿按标识隔离。
 
-`CHESTNUT_MAX_MEETING_SECONDS` 是单场会议的服务端时间上限，默认 `3600` 秒；设为 `0` 表示不限制。`CHESTNUT_MEETING_WARNING_SECONDS` 控制结束前多少秒显示倒计时提醒。邀请码推荐使用 `客户标签=真实邀请码` 格式，会议稿文件名会使用客户标签，例如 `web-2026-09-05-customer-a-143022.md`，不会泄露真实邀请码。服务达到 `CHESTNUT_MAX_CONCURRENT_MEETINGS` 配置的并发数量后会拒绝新会议。同一用户只能进行一场会议，同一场会议的网络重连会替换旧连接。
+`CHESTNUT_MAX_MEETING_SECONDS` 是 Web 与云托管小程序单场会议的服务端时间上限，默认 `3600` 秒；设为 `0` 表示不限制。`CHESTNUT_MEETING_WARNING_SECONDS` 控制结束前多少秒显示倒计时提醒，到期后两端都会停止收音并自动保存会议稿。本地匿名桌面模式不应用该限制。邀请码推荐使用 `客户标签=真实邀请码` 格式，会议稿文件名会使用客户标签，例如 `web-2026-09-05-customer-a-143022.md`，不会泄露真实邀请码。服务达到 `CHESTNUT_MAX_CONCURRENT_MEETINGS` 配置的并发数量后会拒绝新会议。同一用户只能进行一场会议，同一场会议的网络重连会替换旧连接。
 
 登录和 WebSocket 建连频率分别通过以下变量控制：
 

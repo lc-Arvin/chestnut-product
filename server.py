@@ -263,6 +263,10 @@ def invitation_label(candidate):
     return matched_label
 
 
+def meeting_limit_applies_to(identity):
+    return identity.kind in {"web", "wechat"}
+
+
 class SessionMetrics:
     def __init__(self):
         self.session_id = secrets.token_hex(6)
@@ -850,10 +854,10 @@ async def websocket_handler(request):
         await previous_socket.close()
     LOGGER.info("event=meeting_admitted owner=%s kind=%s meeting=%s", identity.subject, identity.kind, meeting_id)
     try:
-        # Web preview meetings use the configurable time limit. Keep the
-        # already-published Mini Program behavior unchanged until its UI can
-        # present the warning and complete an expired meeting gracefully.
-        await handle_browser(browser, meeting_limit_enabled=identity.kind == "web")
+        # Browser and WeChat cloud meetings both understand the warning and
+        # expiry events. Unauthenticated local/LAN development remains
+        # unlimited so it preserves the original desktop workflow.
+        await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity))
     finally:
         await MEETING_REGISTRY.release(identity, session_key)
         if not socket.closed:

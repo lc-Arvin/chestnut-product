@@ -27,6 +27,11 @@
     </view>
   </view>
 
+  <view wx:if="{{meetingWarningVisible}}" class="meeting-warning" role="status">
+    <text>会议即将结束，会议稿将自动保存</text>
+    <text class="meeting-warning-time">{{meetingWarningTime}}</text>
+  </view>
+
   <view class="caption-stack">
     <scroll-view class="caption-card english-card" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{englishAnchor}}">
       <view class="language-label"><text>EN</text> English</view>
