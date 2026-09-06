@@ -171,7 +171,7 @@ CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS="60"
 ## 会议语言选择
 
 Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会议语言」选择两种不同语言。
-默认是中文 ⇄ English。当前提供中文、英语、日语、韩语、法语、德语、西班牙语、俄语、葡萄牙语、阿拉伯语，可任选两种互译（例如日语 ⇄ 英语）。
+默认是中文 ⇄ English。当前提供中文（简体）、粤语、英语、日语、韩语、法语、德语、西班牙语、俄语、葡萄牙语、阿拉伯语，可任选两种互译（例如日语 ⇄ 英语）。
 
 语言对在开始会议时固定，重连沿用本场设置；修改语言请结束会议后返回 Setup。Web 刷新页面、小程序重新启动或完成后开始新会议时默认中英文；同一 Setup 页面中明确选择的语言会保留。
 字幕栏显示所选语言，蓝色标记原文，紫色标记译文；会议稿保存实际语言代码和对应语言名称。未选语言对中的原文不会被误放到其他语言栏。
@@ -181,3 +181,12 @@ Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会�
 语言能力参考：[百炼实时翻译文档](https://www.alibabacloud.com/help/en/model-studio/qwen3-5-livetranslate-flash-realtime)。此处开放的是产品首批语种，不代表模型完整语言列表。新增语种需核对模型翻译和原文转写能力，并进行真实语音验收。
 
 验证：`python -m unittest discover -s tests` 和 `node --test tests/test_languages.cjs`。自动化测试不调用付费模型；仍需使用实际百炼凭证在浏览器和微信真机验证双向语音效果。
+
+### 粤语与简体中文
+
+两端均可选择「粤语」和「中文（简体）」进行双向字幕翻译，也可选择粤语与英语等语言。默认仍为中英文。
+粤语使用独立代码 `yue`，原文不再归入 `zh`；粤语原文与中文译文分别显示和保存。中文译文由模型生成后用 OpenCC 统一为简体字（实时字幕与会议稿一致），粤语原文保留模型原貌。字形转换不负责将粤语词汇改写为普通话，语义翻译仍由百炼模型完成。
+
+粤语/中文组合关闭同语言文本跳过，避免中文目标端不返回文本。会议仍自动识别语言，支持双向发言，暂不新增单向模式或语音播报。参考百炼 [语言代码与能力](https://www.alibabacloud.com/help/en/model-studio/qwen3-5-livetranslate-flash-realtime) 和 [会话参数](https://www.alibabacloud.com/help/en/model-studio/live-translator-client-events)。
+
+部署须重新安装 requirements.txt 中新增的 OpenCC 依赖（云托管重新构建镜像即可）。真实粤语识别、语义翻译效果及同语言返回行为需要真机验收，自动化测试不调用付费模型。

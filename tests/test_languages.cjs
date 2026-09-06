@@ -130,3 +130,30 @@ test('web keeps Chinese/English default and routes arbitrary pair without relabe
 test('native mini-program catalog stays in sync with server JSON', () => {
   assert.deepEqual(languages.labels, require('../shared/languages.json'));
 });
+
+test('Cantonese and Chinese stay in separate web columns and pending records', () => {
+  const { context, elements } = webContext();
+  vm.runInContext('activeLanguagePair = ["yue", "zh"]', context);
+  context.handleRealtimeEvent({ type: 'conversation.item.input_audio_transcription.completed', language: 'yue', transcript: '我哋開會' });
+  context.handleRealtimeEvent({ type: 'response.text.done', translation_target: 'zh', text: '我们开会' });
+  assert.equal(elements.get('#chinese-history').children.length, 1);
+  assert.equal(elements.get('#english-history').children.length, 1);
+  assert.equal(vm.runInContext('meetingRecords.map(x => x.language).join(",")', context), 'yue,zh');
+  vm.runInContext('setCurrentCaption("未完", "yue", "original"); capturePendingCaption(chineseCurrent, activeLanguagePair[0])', context);
+  assert.equal(vm.runInContext('meetingRecords.at(-1).language', context), 'yue');
+});
+
+test('mini program supports Cantonese pair in either order without losing source identity', () => {
+  for (const pair of [['yue', 'zh'], ['zh', 'yue']]) {
+    state.reset();
+    state.state.languagePair = pair;
+    const page = loadPage('miniprogram/pages/live/live.js');
+    page.languagePair = pair;
+    page.handleRealtimeEvent({ type: 'conversation.item.input_audio_transcription.completed', language: 'yue', transcript: '我哋開會' });
+    page.handleRealtimeEvent({ type: 'response.text.done', translation_target: 'zh', text: '我们开会' });
+    assert.equal(page.data.chineseEntries.length, 1);
+    assert.equal(page.data.englishEntries.length, 1);
+    assert.deepEqual(state.state.entries.map(x => x.language), ['yue', 'zh']);
+    assert.equal(state.state.entries[0].text, '我哋開會');
+  }
+});

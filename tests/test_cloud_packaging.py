@@ -52,8 +52,8 @@ async def verify():
         response = await client.get('/api/languages')
         assert response.status == 200
         labels = await response.json()
-        assert labels['zh'] == '中文' and labels['en'] == 'English'
-        assert labels['ja'] == '日本語' and len(labels) == 10
+        assert labels['zh'] == '中文（简体）' and labels['en'] == 'English'
+        assert labels['ja'] == '日本語' and labels['yue'] == '粤语'
         assert server.parse_language_pair() == ('zh', 'en')
         assert server.parse_language_pair('ja,fr') == ('ja', 'fr')
 asyncio.run(verify())
