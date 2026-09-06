@@ -65,3 +65,36 @@ class LanguageSocketTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event['type'], 'meeting.rejected')
             bridge.assert_not_called()
             await socket.close()
+
+
+class CantoneseTests(unittest.TestCase):
+    def test_pair_and_skip_policy(self):
+        for pair in (("yue", "zh"), ("zh", "yue")):
+            self.assertEqual(server.parse_language_pair(','.join(pair)), pair)
+            config = server.session_update('zh', True, language_pair=pair)['session']
+            self.assertEqual(config['translation']['language'], 'zh')
+            self.assertFalse(config['translation']['same_language_skip_options']['skip_text'])
+        self.assertEqual(server.session_update('yue', False)['session']['translation']['language'], 'yue')
+        self.assertTrue(server.session_update('zh', True)['session']['translation']['same_language_skip_options']['skip_text'])
+
+    def test_simplified_translation_preserves_source(self):
+        for event_type in ('response.text.text', 'response.text.done'):
+            event = {'type': event_type, 'text': '我們會議', 'stash': '開始時間'}
+            converted = server.normalize_translation_event(event, 'zh')
+            self.assertEqual(converted['text'], '我们会议')
+            self.assertEqual(converted['stash'], '开始时间')
+            self.assertEqual(event['text'], '我們會議')
+            self.assertEqual(server.normalize_translation_event(event, 'yue'), event)
+        original = {'type': 'conversation.item.input_audio_transcription.completed', 'language': 'yue', 'transcript': '我哋開會'}
+        self.assertEqual(server.normalize_translation_event(original, 'zh'), original)
+
+    def test_saved_cantonese_and_simplified_translation(self):
+        _, text = server.render_meeting_transcript({'entries': [
+            {'language': 'yue', 'role': 'original', 'text': '我哋開會'},
+            {'language': 'zh', 'role': 'translation', 'text': '我們開會'},
+        ]})
+        self.assertIn('粤语 · ORIGINAL', text)
+        self.assertIn('我哋開會', text)
+        self.assertIn('中文（简体） · TRANSLATION', text)
+        self.assertIn('我们开会', text)
+        self.assertNotIn('我們開會', text)

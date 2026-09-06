@@ -1,8 +1,8 @@
 const languageFirst = document.querySelector("#language-first");
 const languageSecond = document.querySelector("#language-second");
-let languageLabels = { zh: "中文", en: "English" };
+let languageLabels = { zh: "中文（简体）", en: "English" };
 let activeLanguagePair = ["zh", "en"];
-const normalizeLanguage = (code) => code === "yue" ? "zh" : code;
+const normalizeLanguage = (code) => code;
 function updateLanguageOptions() {
   for (const [select, other] of [[languageFirst, languageSecond], [languageSecond, languageFirst]]) {
     for (const option of select.options) option.disabled = option.value === other.value;

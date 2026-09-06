@@ -16,7 +16,7 @@ Page({
   data: {
     languageRanges: [languages.codes.map(code => languages.labels[code]), languages.codes.map(code => languages.labels[code])],
     languageIndices: [0, 1],
-    languagePairLabel: "中文 ⇄ English",
+    languagePairLabel: "中文（简体） ⇄ English",
     cloudEnabled: environment.isCloudEnabled(),
     serverHost: environment.getServerHost(),
     serverHint: environment.isCloudEnabled()

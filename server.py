@@ -21,6 +21,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from opencc import OpenCC
 from aiohttp import WSMsgType, web
 from qcloud_cos import CosConfig, CosS3Client
 from websockets.asyncio.client import connect
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
 LANGUAGE_LABELS = json.loads((ROOT / "shared/languages.json").read_text(encoding="utf-8"))
 DEFAULT_LANGUAGE_PAIR = ("zh", "en")
+SIMPLIFIED_CHINESE = OpenCC("t2s")
 
 
 def parse_language_pair(value=None):
@@ -375,10 +377,13 @@ def render_meeting_transcript(payload, filename_label=""):
         language = LANGUAGE_LABELS.get(entry.get("language"), "Unknown language")
         role = "ORIGINAL" if entry.get("role") == "original" else "TRANSLATION"
         timestamp = transcript_time(entry.get("time_seconds", 0))
+        text = str(entry["text"]).strip()
+        if entry.get("language") == "zh" and entry.get("role") == "translation":
+            text = SIMPLIFIED_CHINESE.convert(text)
         lines.extend([
             f"## {timestamp} · {language} · {role}",
             "",
-            markdown_quote(str(entry["text"]).strip()),
+            markdown_quote(text),
             "",
         ])
 
@@ -511,6 +516,16 @@ async def relay_browser_audio(browser, clouds, metrics):
     return False
 
 
+def normalize_translation_event(event, target_language):
+    # Convert translation text only: Cantonese source text must stay untouched.
+    if target_language == "zh" and event.get("type") in {"response.text.text", "response.text.done"}:
+        event = dict(event)
+        for field in ("text", "stash"):
+            if isinstance(event.get(field), str):
+                event[field] = SIMPLIFIED_CHINESE.convert(event[field])
+    return event
+
+
 async def relay_cloud_events(cloud, browser, target_language, browser_send_lock, metrics):
     async for message in cloud:
         try:
@@ -525,6 +540,7 @@ async def relay_cloud_events(cloud, browser, target_language, browser_send_lock,
                     error.get("code") or event.get("code") or "unknown",
                     metrics.request_ids.get(target_language, "-"),
                 )
+            event = normalize_translation_event(event, target_language)
             event["translation_target"] = target_language
             async with browser_send_lock:
                 await browser.send(json.dumps(event))
@@ -595,7 +611,9 @@ async def enforce_meeting_duration(browser, metrics):
     }))
 
 
-def session_update(target_language, include_transcription):
+def session_update(target_language, include_transcription, language_pair=DEFAULT_LANGUAGE_PAIR):
+    # Do not suppress Cantonese-to-Chinese output as same-language speech.
+    skip_text = set(language_pair) != {"yue", "zh"}
     return {
         "event_id": f"session_{target_language}_{os.urandom(8).hex()}",
         "type": "session.update",
@@ -608,7 +626,7 @@ def session_update(target_language, include_transcription):
             } if include_transcription else None,
             "translation": {
                 "language": target_language,
-                "same_language_skip_options": {"skip_text": True, "skip_audio": True},
+                "same_language_skip_options": {"skip_text": skip_text, "skip_audio": True},
             },
             "turn_detection": {
                 "type": "server_vad",
@@ -671,13 +689,13 @@ async def handle_browser(browser, meeting_limit_enabled=True, language_pair=DEFA
                     send_cloud(
                         first_cloud,
                         first_language,
-                        json.dumps(session_update(first_language, include_transcription=True)),
+                        json.dumps(session_update(first_language, include_transcription=True, language_pair=language_pair)),
                         metrics,
                     ),
                     send_cloud(
                         second_cloud,
                         second_language,
-                        json.dumps(session_update(second_language, include_transcription=False)),
+                        json.dumps(session_update(second_language, include_transcription=False, language_pair=language_pair)),
                         metrics,
                     ),
                 )
