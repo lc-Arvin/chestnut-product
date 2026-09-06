@@ -613,7 +613,13 @@ async def enforce_meeting_duration(browser, metrics):
 
 def session_update(target_language, include_transcription, language_pair=DEFAULT_LANGUAGE_PAIR):
     # Do not suppress Cantonese-to-Chinese output as same-language speech.
-    skip_text = set(language_pair) != {"yue", "zh"}
+    translation = {"language": target_language}
+    # Bailian rejects this field entirely for other targets, even when false.
+    if target_language in {"zh", "en"}:
+        translation["same_language_skip_options"] = {
+            "skip_text": set(language_pair) != {"yue", "zh"},
+            "skip_audio": True,
+        }
     return {
         "event_id": f"session_{target_language}_{os.urandom(8).hex()}",
         "type": "session.update",
@@ -624,10 +630,7 @@ def session_update(target_language, include_transcription, language_pair=DEFAULT
             "input_audio_transcription": {
                 "model": "qwen3-asr-flash-realtime",
             } if include_transcription else None,
-            "translation": {
-                "language": target_language,
-                "same_language_skip_options": {"skip_text": skip_text, "skip_audio": True},
-            },
+            "translation": translation,
             "turn_detection": {
                 "type": "server_vad",
                 "threshold": 0.2,

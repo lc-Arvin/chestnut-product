@@ -35,7 +35,11 @@ class LanguageTests(unittest.TestCase):
             self.assertEqual(primary["translation"]["language"], code)
             self.assertTrue(primary["input_audio_transcription"])
             self.assertIsNone(secondary["input_audio_transcription"])
-            self.assertTrue(primary["translation"]["same_language_skip_options"]["skip_text"])
+            if code in {"zh", "en"}:
+                self.assertTrue(primary["translation"]["same_language_skip_options"]["skip_text"])
+            else:
+                self.assertNotIn("same_language_skip_options", primary["translation"])
+                self.assertNotIn("same_language_skip_options", secondary["translation"])
 
 
 class LanguageSocketTests(unittest.IsolatedAsyncioTestCase):
@@ -98,3 +102,23 @@ class CantoneseTests(unittest.TestCase):
         self.assertIn('中文（简体） · TRANSLATION', text)
         self.assertIn('我们开会', text)
         self.assertNotIn('我們開會', text)
+
+
+class TranslationParameterContractTests(unittest.TestCase):
+    def test_all_language_pairs_omit_unsupported_skip_options(self):
+        for first in server.LANGUAGE_LABELS:
+            for second in server.LANGUAGE_LABELS:
+                if first == second:
+                    continue
+                pair = (first, second)
+                for index, target in enumerate(pair):
+                    with self.subTest(pair=pair, target=target):
+                        config = server.session_update(target, index == 0, pair)["session"]["translation"]
+                        self.assertEqual(config["language"], target)
+                        if target not in {"zh", "en"}:
+                            self.assertEqual(config, {"language": target})
+                        else:
+                            self.assertEqual(config["same_language_skip_options"], {
+                                "skip_text": set(pair) != {"yue", "zh"},
+                                "skip_audio": True,
+                            })
