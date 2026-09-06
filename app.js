@@ -1,3 +1,43 @@
+const languageFirst = document.querySelector("#language-first");
+const languageSecond = document.querySelector("#language-second");
+let languageLabels = { zh: "中文", en: "English" };
+let activeLanguagePair = ["zh", "en"];
+const normalizeLanguage = (code) => code === "yue" ? "zh" : code;
+function updateLanguageOptions() {
+  for (const [select, other] of [[languageFirst, languageSecond], [languageSecond, languageFirst]]) {
+    for (const option of select.options) option.disabled = option.value === other.value;
+  }
+}
+async function loadLanguages() {
+  try {
+    const response = await fetch("/api/languages");
+    if (!response.ok) return;
+    languageLabels = await response.json();
+    for (const select of [languageFirst, languageSecond]) {
+      const selected = select.value;
+      select.replaceChildren(...Object.entries(languageLabels).map(([code, label]) => new Option(label, code)));
+      select.value = selected;
+    }
+    updateLanguageOptions();
+  } catch { /* Default Chinese/English remains usable while offline. */ }
+}
+function applyMeetingLanguages() {
+  activeLanguagePair = [languageFirst.value, languageSecond.value];
+  for (const [stage, code] of [[chineseStage, activeLanguagePair[0]], [englishStage, activeLanguagePair[1]]]) {
+    const heading = stage.querySelector(".caption-language");
+    const badge = document.createElement("span");
+    badge.textContent = code.toUpperCase();
+    heading.replaceChildren(badge, document.createTextNode(languageLabels[code]));
+    stage.lang = code;
+    stage.querySelector(".caption-placeholder p").textContent = `${languageLabels[code]} · Listening…`;
+  }
+  document.querySelector("#language-status").textContent = `Auto detect · ${activeLanguagePair.map(code => languageLabels[code]).join(" ⇄ ")}`;
+}
+languageFirst.addEventListener("change", updateLanguageOptions);
+languageSecond.addEventListener("change", updateLanguageOptions);
+updateLanguageOptions();
+loadLanguages();
+
 const screens = {
   setup: document.querySelector("#setup-screen"),
   audio: document.querySelector("#audio-screen"),
@@ -261,17 +301,19 @@ function setConnectionState(state, label) {
 }
 
 function captionColumn(language) {
-  const chinese = ["zh", "yue"].includes(language);
+  const chinese = normalizeLanguage(language) === activeLanguagePair[0];
   return chinese
     ? { history: chineseHistory, current: chineseCurrent, placeholder: chinesePlaceholder, stage: chineseStage }
     : { history: englishHistory, current: englishCurrent, placeholder: englishPlaceholder, stage: englishStage };
 }
 
 function setCurrentCaption(text, language, role) {
+  if (!activeLanguagePair.includes(normalizeLanguage(language))) return;
   const { history, current, placeholder, stage } = captionColumn(language);
   const caption = text?.trim() || "";
   placeholder.hidden = Boolean(caption || history.children.length);
   current.textContent = caption;
+  current.dir = "auto";
   current.className = `transcript-current is-${role}`;
   current.dataset.label = role === "original" ? "ORIGINAL" : "TRANSLATION";
   stage.scrollTop = stage.scrollHeight;
@@ -285,6 +327,7 @@ function clearCurrentCaption(current) {
 
 function appendCaption(text, language, role) {
   if (!text?.trim()) return;
+  if (!activeLanguagePair.includes(normalizeLanguage(language))) return;
   const { history, current, placeholder, stage } = captionColumn(language);
   placeholder.hidden = true;
   const entry = document.createElement("div");
@@ -294,6 +337,7 @@ function appendCaption(text, language, role) {
   badge.textContent = role === "original" ? "ORIGINAL" : "TRANSLATION";
   const line = document.createElement("p");
   line.className = "transcript-line";
+  line.dir = "auto";
   line.textContent = text.trim();
   entry.append(badge, line);
   history.append(entry);
@@ -304,7 +348,7 @@ function appendCaption(text, language, role) {
   stage.scrollTop = stage.scrollHeight;
   meetingRecords.push({
     time_seconds: meetingSeconds,
-    language: ["zh", "yue"].includes(language) ? "zh" : "en",
+    language: normalizeLanguage(language),
     role,
     text: text.trim(),
   });
@@ -366,24 +410,24 @@ function handleRealtimeEvent(event) {
   }
 
   if (event.type === "conversation.item.input_audio_transcription.text") {
-    setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.language || "en", "original");
+    setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.language || activeLanguagePair[1], "original");
   }
 
   if (event.type === "conversation.item.input_audio_transcription.completed") {
-    const column = captionColumn(event.language || "en");
-    appendCaption(event.transcript || column.current.textContent, event.language || "en", "original");
+    const column = captionColumn(event.language || activeLanguagePair[1]);
+    appendCaption(event.transcript || column.current.textContent, event.language || activeLanguagePair[1], "original");
   }
 
   if (event.type === "response.text.text") {
     setCurrentCaption(
       `${event.text || ""}${event.stash || ""}`,
-      event.translation_target || "zh",
+      event.translation_target || activeLanguagePair[0],
       "translation",
     );
   }
 
   if (event.type === "response.text.done") {
-    const language = event.translation_target || "zh";
+    const language = event.translation_target || activeLanguagePair[0];
     const column = captionColumn(language);
     appendCaption(event.text || column.current.textContent, language, "translation");
   }
@@ -468,7 +512,7 @@ function connectBailian() {
   setConnectionState("connecting", "Connecting to Bailian live translation…");
 
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const query = new URLSearchParams({ meeting_id: meetingId || "web-meeting" });
+  const query = new URLSearchParams({ meeting_id: meetingId || "web-meeting", languages: activeLanguagePair.join(",") });
   const socket = new WebSocket(`${scheme}://${location.host}/ws?${query}`);
   bailianSocket = socket;
   socket.addEventListener("message", ({ data }) => {
@@ -540,6 +584,7 @@ async function beginMeeting() {
   meetingWarningRemaining = 0;
   updateMeetingWarning();
   meetingSaveNotice.hidden = true;
+  applyMeetingLanguages();
   meetingTimer.textContent = "00:00:00";
   meetingTimer.dateTime = "PT0S";
   englishHistory.replaceChildren();
@@ -616,8 +661,8 @@ async function stopMeeting({ requireReauth = false } = {}) {
   meetingInterval = undefined;
   meetingWarningRemaining = 0;
   updateMeetingWarning();
-  capturePendingCaption(englishCurrent, "en");
-  capturePendingCaption(chineseCurrent, "zh");
+  capturePendingCaption(englishCurrent, activeLanguagePair[1]);
+  capturePendingCaption(chineseCurrent, activeLanguagePair[0]);
   stopPcmStreaming();
   const socket = bailianSocket;
   bailianSocket = undefined;

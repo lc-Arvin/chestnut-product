@@ -31,6 +31,19 @@ HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
 ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
+LANGUAGE_LABELS = json.loads((ROOT / "miniprogram/config/languages.json").read_text(encoding="utf-8"))
+DEFAULT_LANGUAGE_PAIR = ("zh", "en")
+
+
+def parse_language_pair(value=None):
+    if value is None or not value.strip():
+        return DEFAULT_LANGUAGE_PAIR
+    pair = tuple(part.strip() for part in value.split(","))
+    if len(pair) != 2 or pair[0] == pair[1] or any(code not in LANGUAGE_LABELS for code in pair):
+        raise ValueError("Choose two different supported meeting languages.")
+    return pair
+
+
 MAX_TRANSCRIPT_BYTES = 5_000_000
 COS_BUCKET = os.environ.get("CHESTNUT_COS_BUCKET", "").strip()
 COS_REGION = os.environ.get("TENCENTCLOUD_REGION", os.environ.get("CHESTNUT_COS_REGION", "")).strip()
@@ -359,7 +372,7 @@ def render_meeting_transcript(payload, filename_label=""):
     for entry in entries:
         if not isinstance(entry, dict) or not str(entry.get("text", "")).strip():
             continue
-        language = "中文" if entry.get("language") == "zh" else "English"
+        language = LANGUAGE_LABELS.get(entry.get("language"), "Unknown language")
         role = "ORIGINAL" if entry.get("role") == "original" else "TRANSLATION"
         timestamp = transcript_time(entry.get("time_seconds", 0))
         lines.extend([
@@ -606,7 +619,8 @@ def session_update(target_language, include_transcription):
     }
 
 
-async def handle_browser(browser, meeting_limit_enabled=True):
+async def handle_browser(browser, meeting_limit_enabled=True, language_pair=DEFAULT_LANGUAGE_PAIR):
+    first_language, second_language = language_pair
     metrics = SessionMetrics()
     LOGGER.info("session=%s event=browser_connected", metrics.session_id)
     api_key = os.environ.get("DASHSCOPE_API_KEY")
@@ -630,8 +644,8 @@ async def handle_browser(browser, meeting_limit_enabled=True):
             ping_interval=15,
             ping_timeout=15,
             max_size=None,
-        ) as chinese_cloud:
-            LOGGER.info("session=%s event=cloud_connected target=zh", metrics.session_id)
+        ) as first_cloud:
+            LOGGER.info("session=%s event=cloud_connected target=%s", metrics.session_id, first_language)
             async with connect(
                 url,
                 additional_headers={"Authorization": f"Bearer {api_key}"},
@@ -640,14 +654,14 @@ async def handle_browser(browser, meeting_limit_enabled=True):
                 ping_interval=15,
                 ping_timeout=15,
                 max_size=None,
-            ) as english_cloud:
-                LOGGER.info("session=%s event=cloud_connected target=en", metrics.session_id)
+            ) as second_cloud:
+                LOGGER.info("session=%s event=cloud_connected target=%s", metrics.session_id, second_language)
                 browser_send_lock = asyncio.Lock()
-                first_chinese, first_english = await asyncio.gather(
-                    asyncio.wait_for(chinese_cloud.recv(), timeout=20),
-                    asyncio.wait_for(english_cloud.recv(), timeout=20),
+                first_message, second_message = await asyncio.gather(
+                    asyncio.wait_for(first_cloud.recv(), timeout=20),
+                    asyncio.wait_for(second_cloud.recv(), timeout=20),
                 )
-                for message, target in ((first_chinese, "zh"), (first_english, "en")):
+                for message, target in ((first_message, first_language), (second_message, second_language)):
                     event = json.loads(message)
                     metrics.record_cloud_event(target, event)
                     event["translation_target"] = target
@@ -655,33 +669,33 @@ async def handle_browser(browser, meeting_limit_enabled=True):
 
                 await asyncio.gather(
                     send_cloud(
-                        chinese_cloud,
-                        "zh",
-                        json.dumps(session_update("zh", include_transcription=True)),
+                        first_cloud,
+                        first_language,
+                        json.dumps(session_update(first_language, include_transcription=True)),
                         metrics,
                     ),
                     send_cloud(
-                        english_cloud,
-                        "en",
-                        json.dumps(session_update("en", include_transcription=False)),
+                        second_cloud,
+                        second_language,
+                        json.dumps(session_update(second_language, include_transcription=False)),
                         metrics,
                     ),
                 )
                 browser_to_cloud = asyncio.create_task(
                     relay_browser_audio(
                         browser,
-                        (("zh", chinese_cloud), ("en", english_cloud)),
+                        ((first_language, first_cloud), (second_language, second_cloud)),
                         metrics,
                     ),
                     name=f"browser-to-cloud-{metrics.session_id}",
                 )
-                chinese_to_browser = asyncio.create_task(
-                    relay_cloud_events(chinese_cloud, browser, "zh", browser_send_lock, metrics),
-                    name=f"cloud-zh-{metrics.session_id}",
+                first_to_browser = asyncio.create_task(
+                    relay_cloud_events(first_cloud, browser, first_language, browser_send_lock, metrics),
+                    name=f"cloud-{first_language}-{metrics.session_id}",
                 )
-                english_to_browser = asyncio.create_task(
-                    relay_cloud_events(english_cloud, browser, "en", browser_send_lock, metrics),
-                    name=f"cloud-en-{metrics.session_id}",
+                second_to_browser = asyncio.create_task(
+                    relay_cloud_events(second_cloud, browser, second_language, browser_send_lock, metrics),
+                    name=f"cloud-{second_language}-{metrics.session_id}",
                 )
                 watchdog = asyncio.create_task(
                     monitor_cloud_responsiveness(metrics),
@@ -693,7 +707,7 @@ async def handle_browser(browser, meeting_limit_enabled=True):
                         enforce_meeting_duration(browser, metrics),
                         name=f"duration-limit-{metrics.session_id}",
                     )
-                cloud_tasks = {chinese_to_browser, english_to_browser}
+                cloud_tasks = {first_to_browser, second_to_browser}
                 all_tasks = {browser_to_cloud, *cloud_tasks, watchdog}
                 if duration_limit:
                     all_tasks.add(duration_limit)
@@ -763,6 +777,10 @@ async def handle_browser(browser, meeting_limit_enabled=True):
             pass
     finally:
         LOGGER.info("session=%s event=browser_session_closed %s", metrics.session_id, metrics.summary())
+
+
+async def languages_handler(_request):
+    return web.json_response(LANGUAGE_LABELS)
 
 
 async def health_handler(_request):
@@ -844,6 +862,13 @@ async def websocket_handler(request):
         await socket.close(code=1008, message=b"Rate limited")
         return socket
 
+    try:
+        language_pair = parse_language_pair(request.query.get("languages"))
+    except ValueError as error:
+        await browser.send(json.dumps({"type": "meeting.rejected", "message": str(error)}))
+        await socket.close(code=1008, message=b"Invalid languages")
+        return socket
+
     meeting_id = safe_owner_id(request.query.get("meeting_id"))
     session_key, previous_socket, error = await MEETING_REGISTRY.acquire(identity, meeting_id, browser)
     if error:
@@ -857,7 +882,7 @@ async def websocket_handler(request):
         # Browser and WeChat cloud meetings both understand the warning and
         # expiry events. Unauthenticated local/LAN development remains
         # unlimited so it preserves the original desktop workflow.
-        await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity))
+        await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity), language_pair=language_pair)
     finally:
         await MEETING_REGISTRY.release(identity, session_key)
         if not socket.closed:
@@ -940,6 +965,7 @@ def validate_configuration():
 def create_app():
     validate_configuration()
     app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES)
+    app.router.add_get("/api/languages", languages_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/api/auth/status", auth_status_handler)
     app.router.add_post("/api/auth/invite", invite_auth_handler)

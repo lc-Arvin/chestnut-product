@@ -1,3 +1,4 @@
+const languages = require("../../utils/languages");
 const recorder = require("../../services/recorder");
 const MeetingSocket = require("../../services/meeting-socket");
 const meetingState = require("../../services/meeting-state");
@@ -30,6 +31,13 @@ Page({
   },
 
   onLoad() {
+    this.languagePair = [...meetingState.state.languagePair];
+    this.setData({
+      firstLanguage: languages.labels[this.languagePair[0]],
+      secondLanguage: languages.labels[this.languagePair[1]],
+      firstCode: this.languagePair[0].toUpperCase(),
+      secondCode: this.languagePair[1].toUpperCase(),
+    });
     this.socket = new MeetingSocket();
     this.readyForAudio = false;
     this.entrySequence = 0;
@@ -123,6 +131,14 @@ Page({
   },
 
   handleRealtimeEvent(event) {
+    if (event.type === "meeting.rejected" || event.type === "access.denied") {
+      this.socket.close();
+      recorder.stop();
+      this.readyForAudio = false;
+      this.setData({ connectionState: "error", connectionMessage: event.message || event.error?.message || "会议无法启动", isPaused: true });
+      return;
+    }
+
     if (event.type === "meeting.limit_warning") {
       this.meetingWarningRemaining = Math.max(0, Number(event.remaining_seconds) || 0);
       this.setData({
@@ -149,23 +165,23 @@ Page({
     }
 
     if (event.type === "conversation.item.input_audio_transcription.text") {
-      this.setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.language || "en", "original");
+      this.setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.language || this.languagePair[1], "original");
       return;
     }
 
     if (event.type === "conversation.item.input_audio_transcription.completed") {
-      const language = this.normalizedLanguage(event.language || "en");
+      const language = this.normalizedLanguage(event.language || this.languagePair[1]);
       this.appendCaption(event.transcript || this.currentText(language), language, "original");
       return;
     }
 
     if (event.type === "response.text.text") {
-      this.setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.translation_target || "zh", "translation");
+      this.setCurrentCaption(`${event.text || ""}${event.stash || ""}`, event.translation_target || this.languagePair[0], "translation");
       return;
     }
 
     if (event.type === "response.text.done") {
-      const language = this.normalizedLanguage(event.translation_target || "zh");
+      const language = this.normalizedLanguage(event.translation_target || this.languagePair[0]);
       this.appendCaption(event.text || this.currentText(language), language, "translation");
       return;
     }
@@ -183,17 +199,18 @@ Page({
   },
 
   normalizedLanguage(language) {
-    return ["zh", "yue"].includes(language) ? "zh" : "en";
+    return languages.normalize(language);
   },
 
   currentText(language) {
-    return language === "zh" ? this.data.chineseCurrent : this.data.englishCurrent;
+    return language === this.languagePair[0] ? this.data.chineseCurrent : this.data.englishCurrent;
   },
 
   setCurrentCaption(text, language, role) {
     const normalized = this.normalizedLanguage(language);
+    if (!this.languagePair.includes(normalized)) return;
     const label = role === "original" ? "ORIGINAL" : "TRANSLATION";
-    if (normalized === "zh") {
+    if (normalized === this.languagePair[0]) {
       this.setData({
         chineseCurrent: text,
         chineseCurrentRole: role,
@@ -216,6 +233,7 @@ Page({
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
     const normalized = this.normalizedLanguage(language);
+    if (!this.languagePair.includes(normalized)) return;
     const entry = {
       id: `caption-${++this.entrySequence}`,
       text: cleanText,
@@ -229,7 +247,7 @@ Page({
       text: cleanText,
     });
 
-    if (normalized === "zh") {
+    if (normalized === this.languagePair[0]) {
       this.setData({
         chineseEntries: [...this.data.chineseEntries.slice(-59), entry],
         chineseCurrent: "",
@@ -285,8 +303,8 @@ Page({
   },
 
   capturePendingCaptions() {
-    if (this.data.englishCurrent) this.appendCaption(this.data.englishCurrent, "en", this.data.englishCurrentRole);
-    if (this.data.chineseCurrent) this.appendCaption(this.data.chineseCurrent, "zh", this.data.chineseCurrentRole);
+    if (this.data.englishCurrent) this.appendCaption(this.data.englishCurrent, this.languagePair[1], this.data.englishCurrentRole);
+    if (this.data.chineseCurrent) this.appendCaption(this.data.chineseCurrent, this.languagePair[0], this.data.chineseCurrentRole);
   },
 
   async finalizeMeeting() {

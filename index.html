@@ -55,9 +55,20 @@
                 <span class="setting-label">Languages</span>
                 <span class="setting-hint">Speech and translation</span>
               </span>
-              <select aria-label="Languages">
-                <option>English → Chinese</option>
-                <option>Chinese → English</option>
+              <select id="language-first" aria-label="First meeting language">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label class="setting-row">
+              <span class="setting-icon" aria-hidden="true">⇄</span>
+              <span class="setting-copy">
+                <span class="setting-label">Translate with</span>
+                <span class="setting-hint">Automatic two-way translation</span>
+              </span>
+              <select id="language-second" aria-label="Second meeting language">
+                <option value="en">English</option>
+                <option value="zh">中文</option>
               </select>
             </label>
 
@@ -170,7 +181,7 @@
           </div>
 
           <div class="live-status">
-            <div><span class="status-dot"></span>Auto detect · English ⇄ Chinese</div>
+            <div><span class="status-dot"></span><span id="language-status">Auto detect · English ⇄ 中文</span></div>
             <span class="translation-next">Powered by Bailian LiveTranslate</span>
           </div>
         </div>

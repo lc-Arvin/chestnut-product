@@ -1,4 +1,7 @@
+const languages = require("../utils/languages");
+
 const initialState = () => ({
+  languagePair: [...languages.defaultPair],
   startedAt: "",
   elapsedSeconds: 0,
   entries: [],
@@ -23,7 +26,7 @@ function addEntry(entry) {
   if (!text) return;
   state.entries.push({
     time_seconds: Math.max(0, Number(entry.time_seconds) || 0),
-    language: entry.language === "zh" ? "zh" : "en",
+    language: languages.normalize(entry.language),
     role: entry.role === "translation" ? "translation" : "original",
     text,
   });
