@@ -176,7 +176,7 @@ Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会�
 语言对在开始会议时固定，重连沿用本场设置；修改语言请结束会议后返回 Setup。Web 刷新页面、小程序重新启动或完成后开始新会议时默认中英文；同一 Setup 页面中明确选择的语言会保留。
 字幕栏显示所选语言，蓝色标记原文，紫色标记译文；会议稿保存实际语言代码和对应语言名称。未选语言对中的原文不会被误放到其他语言栏。
 
-服务端和两端共用 `miniprogram/config/languages.json` 语言目录，Web 通过 `GET /api/languages` 读取。更新目录后运行 `python scripts/sync_languages.py` 同步小程序使用的 JS 模块。WebSocket 使用 `languages=zh,en` 参数，未传或空值保持中英文兼容；重复、未知或非两种语言的组合在模型连接前拒绝。始终使用两路模型连接，不随可选语种数量增加。
+服务端和两端共用 `shared/languages.json` 语言目录，Web 通过 `GET /api/languages` 读取。`shared/` 是服务端运行必需文件，必须随 Docker 镜像一同发布；不要将其加入 `.dockerignore`。更新目录后运行 `python scripts/sync_languages.py` 同步小程序使用的 JS 模块。WebSocket 使用 `languages=zh,en` 参数，未传或空值保持中英文兼容；重复、未知或非两种语言的组合在模型连接前拒绝。始终使用两路模型连接，不随可选语种数量增加。
 
 语言能力参考：[百炼实时翻译文档](https://www.alibabacloud.com/help/en/model-studio/qwen3-5-livetranslate-flash-realtime)。此处开放的是产品首批语种，不代表模型完整语言列表。新增语种需核对模型翻译和原文转写能力，并进行真实语音验收。
 
