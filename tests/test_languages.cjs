@@ -128,5 +128,5 @@ test('web keeps Chinese/English default and routes arbitrary pair without relabe
 });
 
 test('native mini-program catalog stays in sync with server JSON', () => {
-  assert.deepEqual(languages.labels, require('../miniprogram/config/languages.json'));
+  assert.deepEqual(languages.labels, require('../shared/languages.json'));
 });

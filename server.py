@@ -31,7 +31,7 @@ HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
 ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
-LANGUAGE_LABELS = json.loads((ROOT / "miniprogram/config/languages.json").read_text(encoding="utf-8"))
+LANGUAGE_LABELS = json.loads((ROOT / "shared/languages.json").read_text(encoding="utf-8"))
 DEFAULT_LANGUAGE_PAIR = ("zh", "en")
 
 
