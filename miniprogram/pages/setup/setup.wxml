@@ -7,7 +7,7 @@
   <view class="card setup-card">
     <text class="eyebrow">Conference Console</text>
     <view class="title">Meeting Setup</view>
-    <view class="subtitle">中英文会议实时字幕与双向翻译</view>
+    <view class="subtitle">多语言会议实时字幕与双向翻译</view>
 
     <view class="settings">
       <view class="setting-row">
@@ -16,7 +16,7 @@
           <text class="setting-title">会议语言</text>
           <text class="setting-hint">自动识别发言语言</text>
         </view>
-        <text class="setting-value">中文 ⇄ English</text>
+        <picker mode="multiSelector" range="{{languageRanges}}" value="{{languageIndices}}" bindchange="handleLanguageChange" aria-label="会议语言"><text class="setting-value">{{languagePairLabel}} ▾</text></picker>
       </view>
 
       <view class="setting-row">

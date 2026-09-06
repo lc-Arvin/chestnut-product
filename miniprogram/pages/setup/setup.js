@@ -1,3 +1,5 @@
+const languages = require("../../utils/languages");
+const meetingState = require("../../services/meeting-state");
 const environment = require("../../config/environment");
 const recorder = require("../../services/recorder");
 const { safeTopPadding } = require("../../utils/layout");
@@ -12,6 +14,9 @@ function isDevTools() {
 
 Page({
   data: {
+    languageRanges: [languages.codes.map(code => languages.labels[code]), languages.codes.map(code => languages.labels[code])],
+    languageIndices: [0, 1],
+    languagePairLabel: "中文 ⇄ English",
     cloudEnabled: environment.isCloudEnabled(),
     serverHost: environment.getServerHost(),
     serverHint: environment.isCloudEnabled()
@@ -24,7 +29,20 @@ Page({
 
   onShow() {
     recorder.stop();
-    this.setData({ serverHost: environment.getServerHost() });
+    const pair = meetingState.state.languagePair;
+    this.setData({ serverHost: environment.getServerHost(), languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
+  },
+
+  handleLanguageChange(event) {
+    const indices = event.detail.value.map(Number);
+    const pair = indices.map(index => languages.codes[index]);
+    if (!languages.validPair(pair)) {
+      wx.showToast({ title: "请选择两种不同语言", icon: "none" });
+      this.setData({ languageIndices: [...this.data.languageIndices] });
+      return;
+    }
+    meetingState.state.languagePair = pair;
+    this.setData({ languageIndices: indices, languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
   },
 
   handleHostInput(event) {

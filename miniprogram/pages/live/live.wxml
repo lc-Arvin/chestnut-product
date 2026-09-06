@@ -34,7 +34,7 @@
 
   <view class="caption-stack">
     <scroll-view class="caption-card english-card" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{englishAnchor}}">
-      <view class="language-label"><text>EN</text> English</view>
+      <view class="language-label"><text>{{secondCode}}</text> {{secondLanguage}}</view>
       <view wx:if="{{showEnglishPlaceholder}}" class="placeholder">
         <view class="listening-rings"></view>
         <text>Start speaking when you’re ready.</text>
@@ -51,9 +51,9 @@
     </scroll-view>
 
     <scroll-view class="caption-card chinese-card" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{chineseAnchor}}">
-      <view class="language-label"><text>中</text> 中文</view>
+      <view class="language-label"><text>{{firstCode}}</text> {{firstLanguage}}</view>
       <view wx:if="{{showChinesePlaceholder}}" class="placeholder">
-        <text>中文原文或翻译将在这里实时显示</text>
+        <text>{{firstLanguage}}原文或翻译将在这里实时显示</text>
       </view>
       <view wx:for="{{chineseEntries}}" wx:key="id" class="caption-entry {{item.role}}">
         <text class="role-label">{{item.label}}</text>
@@ -68,7 +68,7 @@
   </view>
 
   <view class="footer-status">
-    <view><view class="status-dot"></view><text>Auto detect · English ⇄ 中文</text></view>
+    <view><view class="status-dot"></view><text>Auto detect · {{secondLanguage}} ⇄ {{firstLanguage}}</text></view>
     <text>原文蓝色 · 译文紫色</text>
   </view>
 </view>

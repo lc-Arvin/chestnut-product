@@ -1,7 +1,9 @@
+const meetingState = require("./meeting-state");
 const environment = require("../config/environment");
 
 class MeetingSocket {
   constructor() {
+    this.languagePair = [...meetingState.state.languagePair];
     this.task = null;
     this.listeners = new Map();
     this.intentionalClose = false;
@@ -43,14 +45,15 @@ class MeetingSocket {
       message: environment.isCloudEnabled() ? "正在连接云端翻译服务…" : "正在连接本地翻译服务…",
     });
 
+    const query = `?languages=${encodeURIComponent(this.languagePair.join(","))}`;
     const connection = environment.isCloudEnabled()
       ? wx.cloud.connectContainer({
           service: environment.CLOUD_SERVICE,
-          path: "/ws",
+          path: `/ws${query}`,
         })
       : Promise.resolve({
           socketTask: wx.connectSocket({
-            url: environment.websocketUrl(),
+            url: `${environment.websocketUrl()}${query}`,
             tcpNoDelay: true,
             timeout: 20000,
           }),

@@ -17,9 +17,8 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 - Live Meeting 计时器
 - 紧凑 Logo 状态栏与沉浸式大屏字幕
 - Pause / Resume 麦克风静音控制
-- 英文原文实时字幕
-- 中文实时翻译字幕
-- 中英文双向自动识别与互译
+- 可选两种会议语言，自动识别与双向字幕翻译
+- 默认中文 ⇄ English，无需额外设置
 - 蓝色原文、紫色译文角色提示
 - 停止会议时自动保存完整双语会议稿
 - 模型连接异常后的自动重连与安全停止
@@ -168,3 +167,17 @@ CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS="60"
 ## 当前范围
 
 这是 Chestnut Conference Console Prototype。暂不包含用户账户、云端会议存档、说话人分离和生产环境部署。
+
+## 会议语言选择
+
+Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会议语言」选择两种不同语言。
+默认是中文 ⇄ English。当前提供中文、英语、日语、韩语、法语、德语、西班牙语、俄语、葡萄牙语、阿拉伯语，可任选两种互译（例如日语 ⇄ 英语）。
+
+语言对在开始会议时固定，重连沿用本场设置；修改语言请结束会议后返回 Setup。Web 刷新页面、小程序重新启动或完成后开始新会议时默认中英文；同一 Setup 页面中明确选择的语言会保留。
+字幕栏显示所选语言，蓝色标记原文，紫色标记译文；会议稿保存实际语言代码和对应语言名称。未选语言对中的原文不会被误放到其他语言栏。
+
+服务端和两端共用 `miniprogram/config/languages.json` 语言目录，Web 通过 `GET /api/languages` 读取。更新目录后运行 `python scripts/sync_languages.py` 同步小程序使用的 JS 模块。WebSocket 使用 `languages=zh,en` 参数，未传或空值保持中英文兼容；重复、未知或非两种语言的组合在模型连接前拒绝。始终使用两路模型连接，不随可选语种数量增加。
+
+语言能力参考：[百炼实时翻译文档](https://www.alibabacloud.com/help/en/model-studio/qwen3-5-livetranslate-flash-realtime)。此处开放的是产品首批语种，不代表模型完整语言列表。新增语种需核对模型翻译和原文转写能力，并进行真实语音验收。
+
+验证：`python -m unittest discover -s tests` 和 `node --test tests/test_languages.cjs`。自动化测试不调用付费模型；仍需使用实际百炼凭证在浏览器和微信真机验证双向语音效果。
