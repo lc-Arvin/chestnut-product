@@ -6,6 +6,7 @@ const initialState = () => ({
   elapsedSeconds: 0,
   entries: [],
   lastResult: null,
+  pendingPayload: null,
 });
 
 const state = initialState();

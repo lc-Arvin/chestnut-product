@@ -19,13 +19,13 @@ Page({
       entryCount: result.entryCount || 0,
       filename: result.filename || "Not saved",
       message: result.saved
-        ? "完整的原文和译文已经保存到电脑。"
-        : `会议已结束，但会议稿未能写入电脑：${result.error || "本地服务不可用"}`,
+        ? "完整的原文和译文已经保存。"
+        : `会议稿暂未保存，返回服务页可重试：${result.error || "服务暂不可用"}`,
     });
   },
 
   newMeeting() {
-    meetingState.reset();
+    // Preserve unsaved transcript and selected languages for retry.
     wx.reLaunch({ url: "/pages/setup/setup" });
   },
 });

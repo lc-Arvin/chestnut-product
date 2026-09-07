@@ -1,0 +1,5 @@
+.shade { position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; padding:24px; }
+.dialog { width:100%; max-width:380px; padding:24px; border-radius:24px; background:#fff; box-sizing:border-box; }
+.title { font-size:22px; font-weight:600; } .hint { color:#777; margin:12px 0 20px; font-size:14px; }
+input { border:1px solid #ddd; padding:12px; border-radius:12px; margin-bottom:16px; }
+button { background:#85471e; color:white; border-radius:12px; font-size:16px; } .cancel { background:transparent; color:#666; margin-top:8px; } .cancel::after { border:0; } .error { color:#b42318; margin-bottom:12px; }

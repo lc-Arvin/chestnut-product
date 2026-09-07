@@ -120,11 +120,13 @@ function createClientId() {
 }
 
 function unlockConsole() {
+  document.querySelector(".app-shell").inert = false;
   accessGate.hidden = true;
   startButton.disabled = false;
 }
 
 function lockConsole(message = "") {
+  document.querySelector(".app-shell").inert = true;
   startButton.disabled = true;
   accessGate.hidden = false;
   accessError.textContent = message;
@@ -132,26 +134,45 @@ function lockConsole(message = "") {
   window.setTimeout(() => inviteCode.focus(), 0);
 }
 
-async function initializeAccess() {
+let accessAction = null;
+let accessAttempt = 0;
+let pendingTranscript = null;
+let forceInvite = false;
+let savingTranscript = false;
+async function initializeAccess(action = "start") {
+  if (stoppingMeeting || savingTranscript || startButton.disabled) return;
+  if (action === "start" && pendingTranscript) { await initializeAccess("save"); return; }
+  accessAction = action;
+  startButton.disabled = true;
   try {
     const response = await fetch("/api/auth/status");
-    if (response.status === 404) {
-      unlockConsole();
-      return;
-    }
+    if (!response.ok) throw new Error("Could not verify access. Please retry.");
     const status = await response.json();
-    if (!status.auth_required || status.authenticated) {
-      unlockConsole();
-    } else {
-      lockConsole();
-    }
-  } catch {
-    lockConsole("Chestnut could not reach the service. Please try again.");
-  }
+    if ((!status.auth_required || status.authenticated) && !forceInvite) await continueAfterAccess();
+    else lockConsole();
+  } catch (error) { lockConsole(error.message || "Could not reach the service. Please retry."); }
+  finally { startButton.disabled = false; }
+}
+async function continueAfterAccess() {
+  const action = accessAction;
+  accessAction = null;
+  unlockConsole();
+  if (action === "save") await saveMeetingTranscript();
+  else if (action === "start") await beginAudioCheck();
+}
+function cancelAccess() {
+  accessAttempt += 1;
+  accessAction = null;
+  inviteCode.value = "";
+  accessButton.disabled = false;
+  unlockConsole();
+  startButton.focus();
 }
 
 async function submitInvitation(event) {
   event.preventDefault();
+  if (accessButton.disabled) return;
+  const attempt = ++accessAttempt;
   accessButton.disabled = true;
   accessError.hidden = true;
   try {
@@ -162,13 +183,15 @@ async function submitInvitation(event) {
     });
     const result = await response.json();
     if (!response.ok || !result.authenticated) throw new Error(result.error || "Invitation code not accepted.");
+    if (attempt !== accessAttempt) return;
+    forceInvite = false;
     inviteCode.value = "";
     setInviteVisibility(false);
-    unlockConsole();
+    await continueAfterAccess();
   } catch (error) {
-    lockConsole(error.message || "Invitation code not accepted.");
+    if (attempt === accessAttempt) lockConsole(error.message || "Invitation code not accepted.");
   } finally {
-    accessButton.disabled = false;
+    if (attempt === accessAttempt) accessButton.disabled = false;
   }
 }
 
@@ -356,13 +379,8 @@ function appendCaption(text, language, role) {
 
 function handleRealtimeEvent(event) {
   if (event.type === "access.denied") {
-    stoppingMeeting = true;
-    stopPcmStreaming();
-    releaseMicrophone();
-    bailianSocket?.close();
-    bailianSocket = undefined;
-    showScreen("setup");
-    lockConsole(event.error?.message || "Your access has expired. Enter the invitation code again.");
+    forceInvite = true;
+    stopMeeting({ requireReauth: true });
     return;
   }
 
@@ -622,6 +640,9 @@ function capturePendingCaption(current, language) {
 }
 
 async function saveMeetingTranscript() {
+  if (!pendingTranscript || savingTranscript) return;
+  savingTranscript = true;
+  document.querySelector("#retry-save-button").disabled = true;
   meetingSaveNotice.hidden = false;
   meetingSaveNotice.classList.remove("is-error");
   meetingSaveMessage.textContent = "Saving meeting transcript…";
@@ -631,24 +652,24 @@ async function saveMeetingTranscript() {
     const response = await fetch("/api/meetings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meeting_id: meetingId,
-        started_at: meetingStartedAt?.toISOString(),
-        ended_at: new Date().toISOString(),
-        duration_seconds: meetingSeconds,
-        entries: meetingRecords,
-      }),
+      body: JSON.stringify(pendingTranscript),
     });
+    if (response.status === 401) forceInvite = true;
     if (!response.ok) throw new Error(await response.text());
     const result = await response.json();
+    pendingTranscript = null;
     meetingSaveMessage.textContent = `Transcript saved · ${result.filename}`;
     meetingFileUrl = result.url || "";
     meetingFileLink.href = meetingFileUrl || "#";
     meetingFileLink.hidden = !meetingFileUrl;
   } catch (error) {
     meetingSaveNotice.classList.add("is-error");
-    meetingSaveMessage.textContent = "Transcript could not be saved. Keep this window open and try stopping again.";
+    meetingSaveMessage.textContent = "Transcript could not be saved. Keep this page open and select Retry save.";
     meetingFileLink.hidden = true;
+  } finally {
+    savingTranscript = false;
+    document.querySelector("#retry-save-button").disabled = false;
+    document.querySelector("#retry-save-button").hidden = !pendingTranscript;
   }
 }
 
@@ -671,7 +692,7 @@ async function stopMeeting({ requireReauth = false } = {}) {
   releaseMicrophone();
   showScreen("setup");
   if (requireReauth) {
-    lockConsole("This meeting reached its time limit. Enter your invitation code to start another meeting.");
+    forceInvite = true;
   }
   if (socket?.readyState === WebSocket.OPEN) {
     await new Promise((resolve) => {
@@ -688,6 +709,7 @@ async function stopMeeting({ requireReauth = false } = {}) {
   } else {
     socket?.close();
   }
+  pendingTranscript = { meeting_id: meetingId, started_at: meetingStartedAt?.toISOString(), ended_at: new Date().toISOString(), duration_seconds: meetingSeconds, entries: [...meetingRecords] };
   await saveMeetingTranscript();
   if (requireReauth) {
     try {
@@ -697,11 +719,21 @@ async function stopMeeting({ requireReauth = false } = {}) {
   stoppingMeeting = false;
 }
 
-startButton.addEventListener("click", beginAudioCheck);
+startButton.addEventListener("click", () => initializeAccess());
+document.querySelector("#access-cancel").addEventListener("click", cancelAccess);
+document.querySelector("#retry-save-button").addEventListener("click", () => initializeAccess("save"));
+accessGate.addEventListener("keydown", event => {
+  if (event.key === "Escape") cancelAccess();
+  if (event.key === "Tab") {
+    const items = [...accessGate.querySelectorAll("input, button")].filter(item => !item.disabled);
+    const first = items[0], last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
 accessForm.addEventListener("submit", submitInvitation);
 inviteVisibilityButton.addEventListener("click", toggleInviteVisibility);
 continueButton.addEventListener("click", beginMeeting);
 pauseButton.addEventListener("click", togglePause);
 stopButton.addEventListener("click", () => stopMeeting());
 retryButton.addEventListener("click", connectBailian);
-initializeAccess();

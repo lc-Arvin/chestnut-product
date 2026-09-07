@@ -1,3 +1,4 @@
+const access = require("./access");
 const meetingState = require("./meeting-state");
 const environment = require("../config/environment");
 
@@ -45,7 +46,7 @@ class MeetingSocket {
       message: environment.isCloudEnabled() ? "正在连接云端翻译服务…" : "正在连接本地翻译服务…",
     });
 
-    const query = `?languages=${encodeURIComponent(this.languagePair.join(","))}`;
+    const query = `?auth=message&meeting_id=${encodeURIComponent(meetingState.state.startedAt || "mini-meeting")}&languages=${encodeURIComponent(this.languagePair.join(","))}`;
     const connection = environment.isCloudEnabled()
       ? wx.cloud.connectContainer({
           service: environment.CLOUD_SERVICE,
@@ -68,6 +69,7 @@ class MeetingSocket {
 
       task.onOpen(() => {
         if (generation !== this.generation) return;
+        task.send({ data: JSON.stringify({ type: "auth.authenticate", token: access.token() }) });
         this.emit("state", { state: "connected", message: "服务已连接，正在准备翻译…" });
       });
 
@@ -76,6 +78,7 @@ class MeetingSocket {
         if (typeof data !== "string") return;
         try {
           const event = JSON.parse(data);
+          if (event.type === "access.denied" || event.type === "meeting.rejected") { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
           if (event.type === "session.updated") this.reconnectAttempts = 0;
           this.emit("event", event);
         } catch (error) {
