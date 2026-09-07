@@ -150,3 +150,31 @@ test('Mini direct audio-page entry checks access before microphone subscription'
   vm.runInContext(source('miniprogram/pages/audio-check/audio-check.js'),c);
   await page.onLoad();assert.equal(subscriptions,0);assert.equal(redirects,1);
 });
+
+test('Mini invitation errors are English and keep the dialog retryable', async()=>{
+  let component;let failure;let calls=0;const events=[];
+  const c=vm.createContext({Component:x=>component=x,require:()=>({login:async()=>{calls++;if(failure)throw failure;}})});
+  vm.runInContext(source('miniprogram/components/invite-dialog/invite-dialog.js'),c);
+  const dialog={...component.methods,data:{code:'  ',busy:false,error:''},setData(x){Object.assign(this.data,x);},triggerEvent:x=>events.push(x)};
+  await dialog.submit();assert.equal(calls,0);assert.equal(dialog.data.error,'Enter your invitation code.');
+  for (const [error,expected] of [
+    [{status:401,message:'邀请码错误'},'Invalid invitation code. Please try again.'],
+    [{status:429},'Too many attempts. Please wait and try again.'],
+    [{errMsg:'request:fail'},'Unable to verify your code. Please try again.'],
+    [{status:500,message:'内部错误'},'Unable to verify your code. Please try again.'],
+  ]) {
+    dialog.input({detail:{value:'try-again'}});assert.equal(dialog.data.error,'');
+    failure=error;await dialog.submit();assert.equal(dialog.data.error,expected);
+    assert.equal(dialog.data.busy,false);assert.deepEqual(events,[]);
+  }
+  failure=null;await dialog.submit();assert.deepEqual(events,['verified']);
+});
+
+test('Mini invitation submits once while verification is pending',async()=>{
+  let component,finish;let calls=0;
+  const c=vm.createContext({Component:x=>component=x,require:()=>({login:()=>{calls++;return new Promise(resolve=>finish=resolve);}})});
+  vm.runInContext(source('miniprogram/components/invite-dialog/invite-dialog.js'),c);
+  const dialog={...component.methods,data:{code:'good',busy:false,error:''},setData(x){Object.assign(this.data,x);},triggerEvent(){}};
+  const pending=dialog.submit();await dialog.submit();assert.equal(calls,1);
+  finish();await pending;assert.equal(dialog.data.busy,false);
+});
