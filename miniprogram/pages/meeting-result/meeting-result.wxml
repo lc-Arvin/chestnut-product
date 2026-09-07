@@ -16,6 +16,6 @@
       <view><text>Transcript</text><text class="summary-value filename">{{filename}}</text></view>
     </view>
 
-    <button class="primary-button" bindtap="newMeeting">Start New Meeting</button>
+    <button class="primary-button" bindtap="newMeeting">返回服务页</button>
   </view>
 </view>

@@ -202,12 +202,12 @@ def token_signature(payload):
     return base64url_encode(hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).digest())
 
 
-def issue_access_token(client_id, invite_label="invite"):
+def issue_access_token(client_id, invite_label="invite", wechat_openid=""):
     now = int(time.time())
     subject_digest = hmac.new(AUTH_SECRET.encode(), client_id.encode(), hashlib.sha256).hexdigest()[:32]
     payload = base64url_encode(json.dumps({
-        "sub": f"web-{subject_digest}",
-        "kind": "web",
+        "sub": f"wechat-{safe_owner_id(wechat_openid)}" if wechat_openid else f"web-{subject_digest}",
+        "kind": "wechat" if wechat_openid else "web",
         "label": safe_invite_label(invite_label),
         "iat": now,
         "exp": now + WEB_TOKEN_TTL_SECONDS,
@@ -226,9 +226,9 @@ def verify_access_token(token):
         if int(claims.get("exp", 0)) <= int(time.time()):
             return None
         subject = safe_owner_id(claims.get("sub"))
-        if not subject or claims.get("kind") != "web":
+        if not subject or claims.get("kind") not in {"web", "wechat"}:
             return None
-        return ClientIdentity(subject=subject, kind="web", label=safe_invite_label(claims.get("label")))
+        return ClientIdentity(subject=subject, kind=claims["kind"], label=safe_invite_label(claims.get("label")))
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
 
@@ -245,12 +245,17 @@ def request_token(request):
     return request.cookies.get("chestnut_access", "").strip()
 
 
-def request_identity(request):
+def request_identity(request, token=None):
     wechat_openid = request.headers.get("x-wx-openid", "").strip()
+    identity = verify_access_token(request_token(request) if token is None else token)
     if wechat_openid:
-        return ClientIdentity(subject=f"wechat-{safe_owner_id(wechat_openid)}", kind="wechat")
-    identity = verify_access_token(request_token(request))
-    if identity:
+        subject = f"wechat-{safe_owner_id(wechat_openid)}"
+        if identity and identity.kind == "wechat" and identity.subject == subject:
+            return identity
+        if not AUTH_REQUIRED:
+            return ClientIdentity(subject=subject, kind="wechat")
+        return None
+    if identity and identity.kind == "web":
         return identity
     if not AUTH_REQUIRED:
         return ClientIdentity(subject="local-anonymous", kind="local")
@@ -814,7 +819,7 @@ async def auth_status_handler(request):
         "authenticated": request_identity(request) is not None,
         "max_meeting_seconds": MAX_MEETING_SECONDS,
         "meeting_warning_seconds": MEETING_WARNING_SECONDS,
-    })
+    }, headers={"Cache-Control": "no-store"})
 
 
 async def invite_auth_handler(request):
@@ -830,15 +835,22 @@ async def invite_auth_handler(request):
         payload = await request.json()
     except (json.JSONDecodeError, TypeError):
         return web.json_response({"error": "Invalid request."}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "Invalid request."}, status=400)
     code = payload.get("code", "")
     client_id = str(payload.get("client_id", "")).strip()
     invite_label = invitation_label(code)
     if len(client_id) < 8 or len(client_id) > 200 or not invite_label:
         LOGGER.warning("event=invite_rejected ip=%s", ip)
         return web.json_response({"error": "Invitation code not accepted."}, status=401)
-    token = issue_access_token(client_id, invite_label)
+    token = issue_access_token(client_id, invite_label, request.headers.get("x-wx-openid", "").strip())
     LOGGER.info("event=invite_accepted ip=%s", ip)
-    response = web.json_response({"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS})
+    result = {"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS}
+    if payload.get("client_type") == "miniprogram":
+        result["access_token"] = token
+    response = web.json_response(result, headers={"Cache-Control": "no-store"})
+    if payload.get("client_type") == "miniprogram":
+        return response
     forwarded_scheme = request.headers.get("x-forwarded-proto", request.scheme).split(",", 1)[0].strip()
     response.set_cookie(
         "chestnut_access",
@@ -868,6 +880,22 @@ async def websocket_handler(request):
     await socket.prepare(request)
     browser = AiohttpSocket(socket)
     identity = request_identity(request)
+    if request.query.get("auth") == "message":
+        # Mini-program cloud sockets do not need custom handshake headers.
+        # No model connection or audio relay exists before authentication.
+        try:
+            message = await asyncio.wait_for(socket.receive(), timeout=10)
+            if message.type != WSMsgType.TEXT or len(message.data) > 8192:
+                raise ValueError("Invalid authentication message")
+            payload = json.loads(message.data)
+            if not isinstance(payload, dict) or payload.get("type") != "auth.authenticate":
+                raise ValueError("Authentication required")
+            token = payload.get("token", "")
+            if not isinstance(token, str):
+                raise ValueError("Invalid token")
+            identity = request_identity(request, token)
+        except (ValueError, TypeError, asyncio.TimeoutError):
+            identity = None
     if not identity:
         await browser.send(json.dumps({
             "type": "access.denied",

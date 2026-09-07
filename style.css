@@ -366,3 +366,6 @@ body.is-live .live-status { margin: 10px 0 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
+
+.service-features { color:var(--muted); font-size:14px; line-height:1.6; margin:20px 0; }
+#access-cancel { margin-top:12px; width:100%; }

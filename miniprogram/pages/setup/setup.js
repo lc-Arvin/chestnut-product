@@ -1,3 +1,5 @@
+const access = require("../../services/access");
+const meetingStateApi = require("../../services/meeting-api");
 const languages = require("../../utils/languages");
 const meetingState = require("../../services/meeting-state");
 const environment = require("../../config/environment");
@@ -14,6 +16,9 @@ function isDevTools() {
 
 Page({
   data: {
+    inviteVisible: false,
+    busy: false,
+    pendingSave: false,
     languageRanges: [languages.codes.map(code => languages.labels[code]), languages.codes.map(code => languages.labels[code])],
     languageIndices: [0, 1],
     languagePairLabel: "中文（简体） ⇄ English",
@@ -29,6 +34,7 @@ Page({
 
   onShow() {
     recorder.stop();
+    this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;
     this.setData({ serverHost: environment.getServerHost(), languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
   },
@@ -56,7 +62,45 @@ Page({
     return serverHost;
   },
 
-  startMeeting() {
+  cancelInvite() { this.action = null; this.setData({ inviteVisible: false }); },
+  async verified() {
+    this.setData({ inviteVisible: false });
+    const action = this.action;
+    this.action = null;
+    if (action === "save") await this.savePending();
+    else if (action === "start") wx.navigateTo({ url: "/pages/audio-check/audio-check" });
+  },
+  async runAuthorized(action) {
+    this.setData({ busy: true });
+    this.action = action;
+    try {
+      if (await access.authorized()) await this.verified();
+      else this.setData({ inviteVisible: true });
+    } catch (error) { wx.showToast({ title: "无法连接服务，请重试", icon: "none" }); }
+    finally { this.setData({ busy: false }); }
+  },
+  retrySave() { if (!this.data.busy) this.runAuthorized("save"); },
+  async savePending() {
+    if (this.saving || !meetingState.state.pendingPayload) return;
+    this.saving = true;
+    this.setData({ busy: true });
+    try {
+      await meetingStateApi.saveMeeting(meetingState.state.pendingPayload);
+      meetingState.state.pendingPayload = null;
+      this.setData({ pendingSave: false });
+      wx.showToast({ title: "会议稿已保存" });
+    } catch (error) {
+      if (error.status === 401) { this.action = "save"; this.setData({ inviteVisible: true }); }
+      else wx.showToast({ title: "保存失败，可再次重试", icon: "none" });
+    } finally {
+      this.saving = false;
+      this.setData({ busy: false });
+    }
+  },
+
+  async startMeeting() {
+    if (this.data.busy) return;
+    if (meetingState.state.pendingPayload) { wx.showToast({ title: "请先重试保存上一场会议稿", icon: "none" }); return; }
     const serverHost = this.saveHost();
     if (!this.data.cloudEnabled && !this.data.isDevTools && environment.isLoopbackHost(serverHost)) {
       wx.showModal({
@@ -67,6 +111,6 @@ Page({
       });
       return;
     }
-    wx.navigateTo({ url: "/pages/audio-check/audio-check" });
+    await this.runAuthorized("start");
   },
 });

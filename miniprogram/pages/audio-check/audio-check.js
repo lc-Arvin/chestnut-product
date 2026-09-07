@@ -1,3 +1,4 @@
+const access = require("../../services/access");
 const recorder = require("../../services/recorder");
 const { pcmLevel } = require("../../utils/audio");
 const { safeTopPadding } = require("../../utils/layout");
@@ -14,7 +15,11 @@ Page({
     message: "请允许麦克风权限，然后正常说话。",
   },
 
-  onLoad() {
+  async onLoad() {
+    try {
+      if (!(await access.authorized())) { wx.redirectTo({ url: "/pages/setup/setup" }); return; }
+    } catch (error) { wx.redirectTo({ url: "/pages/setup/setup" }); return; }
+    if (this.disposed) return;
     this.remaining = 5;
     this.voiceDetected = false;
     this.leavingForLive = false;
@@ -29,6 +34,7 @@ Page({
   },
 
   onUnload() {
+    this.disposed = true;
     clearInterval(this.countdownTimer);
     clearTimeout(this.recorderStartFallback);
     this.unsubscribeFrame?.();

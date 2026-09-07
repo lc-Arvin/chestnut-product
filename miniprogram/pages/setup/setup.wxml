@@ -9,6 +9,12 @@
     <view class="title">Meeting Setup</view>
     <view class="subtitle">多语言会议实时字幕与双向翻译</view>
 
+    <view class="service-features">
+      <view>实时双语字幕 · 多语言自动互译</view>
+      <view>支持粤语与简体中文 · 会议稿保存</view>
+      <view>选择语言 → 开始会议 → 检测麦克风 → 实时翻译</view>
+      <view>可先了解服务，开始会议时再验证邀请码。</view>
+    </view>
     <view class="settings">
       <view class="setting-row">
         <view class="setting-icon">文</view>
@@ -54,9 +60,12 @@
       </view>
     </view>
 
-    <button class="primary-button" bindtap="startMeeting">
+    <button class="primary-button" bindtap="startMeeting" loading="{{busy}}" disabled="{{busy}}">
       Start Meeting <text>→</text>
     </button>
+    <button wx:if="{{pendingSave}}" bindtap="retrySave" disabled="{{busy}}">重试保存上一场会议稿</button>
     <view class="local-note">{{cloudEnabled ? 'CLOUD SERVICE · API Key 安全保存在服务端' : 'LOCAL MVP · API Key 仅保存在电脑端'}}</view>
   </view>
 </view>
+
+<invite-dialog visible="{{inviteVisible}}" bindverified="verified" bindcancel="cancelInvite" />

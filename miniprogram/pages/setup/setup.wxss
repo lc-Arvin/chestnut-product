@@ -101,3 +101,5 @@
   letter-spacing: 1rpx;
   text-align: center;
 }
+
+.service-features { color:#626269; font-size:13px; line-height:1.9; margin:16px 0; }

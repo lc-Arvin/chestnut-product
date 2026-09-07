@@ -1,3 +1,4 @@
+const access = require("../../services/access");
 const languages = require("../../utils/languages");
 const recorder = require("../../services/recorder");
 const MeetingSocket = require("../../services/meeting-socket");
@@ -131,7 +132,13 @@ Page({
   },
 
   handleRealtimeEvent(event) {
-    if (event.type === "meeting.rejected" || event.type === "access.denied") {
+    if (event.type === "access.denied") {
+      access.clear();
+      this.socket.close();
+      this.stopMeeting("auth");
+      return;
+    }
+    if (event.type === "meeting.rejected") {
       this.socket.close();
       recorder.stop();
       this.readyForAudio = false;
@@ -286,6 +293,7 @@ Page({
   stopMeeting(trigger) {
     if (this.data.ending) return;
     const limitReached = trigger === "limit";
+    this.requireReauth = limitReached || trigger === "auth";
     this.meetingWarningRemaining = 0;
     this.setData({
       ending: true,
@@ -320,9 +328,11 @@ Page({
       entries: meetingState.state.entries,
     };
 
+    meetingState.state.pendingPayload = payload;
     let result;
     try {
       const saved = await saveMeeting(payload);
+      meetingState.state.pendingPayload = null;
       result = {
         saved: true,
         filename: saved.filename,
@@ -337,6 +347,7 @@ Page({
         entryCount: meetingState.state.entries.length,
       };
     }
+    if (this.requireReauth) access.clear();
     meetingState.state.lastResult = result;
     wx.redirectTo({ url: "/pages/meeting-result/meeting-result" });
   },

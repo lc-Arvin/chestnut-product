@@ -140,7 +140,7 @@ CHESTNUT_MAX_CONCURRENT_MEETINGS="20"
 CHESTNUT_ALLOWED_ORIGINS="https://your-web-domain.example"
 ```
 
-配置邀请码后，Web 用户必须先验证才能连接实时翻译或保存会议稿。服务通过 `HttpOnly` Cookie 保存有时效的签名凭证，凭证不会出现在 WebSocket URL 中，页面脚本也无法读取。API Key 和签名密钥都不会进入前端。不同浏览器会得到独立用户标识，会议稿按标识隔离。
+配置邀请码后，Web 和小程序均可公开浏览服务首页；点击开始会议时才检查凭证，未验证或凭证过期时弹出邀请码窗口。验证成功后自动进入麦克风检测。实时翻译和会议稿接口都要求有效凭证。服务通过 `HttpOnly` Cookie 保存有时效的签名凭证，凭证不会出现在 WebSocket URL 中，页面脚本也无法读取。API Key 和签名密钥都不会进入前端。不同浏览器会得到独立用户标识，会议稿按标识隔离。
 
 `CHESTNUT_MAX_MEETING_SECONDS` 是 Web 与云托管小程序单场会议的服务端时间上限，默认 `3600` 秒；设为 `0` 表示不限制。`CHESTNUT_MEETING_WARNING_SECONDS` 控制结束前多少秒显示倒计时提醒，到期后两端都会停止收音并自动保存会议稿。本地匿名桌面模式不应用该限制。邀请码推荐使用 `客户标签=真实邀请码` 格式，会议稿文件名会使用客户标签，例如 `web-2026-09-05-customer-a-143022.md`，不会泄露真实邀请码。服务达到 `CHESTNUT_MAX_CONCURRENT_MEETINGS` 配置的并发数量后会拒绝新会议。同一用户只能进行一场会议，同一场会议的网络重连会替换旧连接。
 
@@ -155,7 +155,7 @@ CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS="60"
 
 当前并发登记和频率限制保存在单个服务实例内。私测阶段应将云托管最大实例数设为 `1`；正式横向扩容前，需要迁移到 Redis 等共享状态服务。
 
-未配置 `CHESTNUT_WEB_INVITE_CODES` 时，服务保持原有本地开发模式，不显示邀请码页面。微信小程序继续通过云托管注入的 `x-wx-openid` 识别用户，不使用 Web 邀请码。
+未配置 `CHESTNUT_WEB_INVITE_CODES` 时，两端保持开发模式，不要求邀请码。该配置名为兼容旧部署保留，现在统一控制两端。云托管小程序通过可信网关注入的 `x-wx-openid` 识别用户，同时必须携带邀请码验证后签发的凭证；不能只凭 OpenID 访问受保护接口。
 
 ## 安全说明
 
@@ -190,3 +190,19 @@ Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会�
 粤语/中文组合关闭同语言文本跳过，避免中文目标端不返回文本。会议仍自动识别语言，支持双向发言，暂不新增单向模式或语音播报。参考百炼 [语言代码与能力](https://www.alibabacloud.com/help/en/model-studio/qwen3-5-livetranslate-flash-realtime) 和 [会话参数](https://www.alibabacloud.com/help/en/model-studio/live-translator-client-events)。
 
 部署须重新安装 requirements.txt 中新增的 OpenCC 依赖（云托管重新构建镜像即可）。真实粤语识别、语义翻译效果及同语言返回行为需要真机验收，自动化测试不调用付费模型。
+
+## 公开服务页与统一邀请码入口
+
+- 两端首页公开展示功能、流程和语言选择。只在点击「开始会议」或「重试保存」需要授权时弹出邀请码窗口；取消后留在服务页，保留语言设置。
+- Web 使用 HttpOnly Cookie；小程序使用 `/api/auth/invite` 返回的签名凭证，通过请求头访问 HTTP API。微信凭证绑定云托管注入的 OpenID，沿用 `wechat-{OpenID}` 会议稿归属。
+- 小程序 WebSocket 使用 `auth=message`，打开后第一条消息发送 `auth.authenticate` 和凭证。服务端在 10 秒内验证首条消息，通过前不连接模型或转发音频。凭证不放进 URL。旧的无凭证小程序连接会被拒绝。
+- 有效期内无需重复输入。到达会议时长上限后先尝试保存，再清除客户端凭证，下次点击开始要求验证。普通结束保留凭证。
+- 保存失败保留原始会议稿供重试：Web 服务页有 Retry save，小程序结果页返回服务页后可点击重试。验证过期可重新输入邀请码后保存；保存成功前不会开启新会议覆盖旧内容。未保存稿目前保留在当前页面/小程序进程内存中，请勿刷新网页或彻底关闭小程序。
+
+部署：
+1. 沿用现有 `CHESTNUT_WEB_INVITE_CODES`、`CHESTNUT_AUTH_SECRET` 和有效期配置；不需要新增密钥。保持签名密钥稳定以兼容已有 Web 登录。
+2. 从本次版本重新构建并部署服务端（Web 随服务端更新）。
+3. 微信开发者工具上传同一版本的 `miniprogram/`，设置为体验版，提醒体验用户重新打开。服务端启用后旧小程序将无法直接开始会议，应安排同步更新。
+4. 用 Web 无痕窗口和微信体验成员分别验证公开浏览、取消、错误码、成功继续、重连与到期保存。微信体验成员权限和产品邀请码为两层独立权限。
+
+回归命令：`python -m unittest discover -s tests`；`node --test tests/test_access.cjs tests/test_languages.cjs`。不调用付费模型。尚需微信真机验收云托管通道和麦克风权限弹窗。

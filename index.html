@@ -8,12 +8,12 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <section class="access-gate" id="access-gate" aria-labelledby="access-title" hidden>
+    <section class="access-gate" id="access-gate" role="dialog" aria-modal="true" aria-labelledby="access-title" hidden>
       <form class="access-card" id="access-form">
         <span class="brand-mark access-mark" aria-hidden="true">✦</span>
         <div class="eyebrow">Private Preview</div>
         <h1 id="access-title">Welcome to ChestnutOne</h1>
-        <p class="intro">Enter your invitation code to open the conference console.</p>
+        <p class="intro">Enter your invitation code to continue with your meeting.</p>
         <label class="access-field">
           <span>Invitation code</span>
           <span class="access-input-wrap">
@@ -33,6 +33,7 @@
         </label>
         <p class="access-error" id="access-error" role="alert" hidden></p>
         <button class="primary-button" id="access-button" type="submit">Continue <span aria-hidden="true">→</span></button>
+        <button id="access-cancel" class="secondary-button" type="button">Not now · Continue browsing</button>
       </form>
     </section>
 
@@ -46,8 +47,14 @@
         <div class="panel setup-panel">
           <div class="eyebrow">Conference Console</div>
           <h1 id="setup-title">Meeting Setup</h1>
-          <p class="intro">Everything you need to begin, in one place.</p>
+          <p class="intro">Real-time bilingual captions for your meetings.</p>
 
+          <div class="service-features">
+            <p>Automatic translation across multiple languages, including Cantonese and Simplified Chinese.</p>
+            <p>Live captions · Microphone check · Saved meeting transcripts</p>
+            <p>Choose languages → Start meeting → Check microphone → Translate live</p>
+            <p>Explore freely. An invitation code is requested when you start a meeting.</p>
+          </div>
           <div class="settings" aria-label="Meeting settings">
             <label class="setting-row">
               <span class="setting-icon" aria-hidden="true">文</span>
@@ -93,12 +100,13 @@
             </div>
           </div>
 
-          <button class="primary-button" id="start-button" type="button" disabled>
+          <button class="primary-button" id="start-button" type="button">
             Start Meeting <span aria-hidden="true">→</span>
           </button>
           <div class="meeting-save-notice" id="meeting-save-notice" hidden>
             <span class="save-check" aria-hidden="true">✓</span>
             <span id="meeting-save-message">Meeting transcript saved.</span>
+            <button id="retry-save-button" type="button" hidden>Retry save</button>
             <a id="meeting-file-link" href="#" target="_blank" rel="noopener">Open file</a>
           </div>
         </div>

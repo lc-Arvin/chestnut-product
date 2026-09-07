@@ -1,4 +1,7 @@
 {
   "navigationBarTitleText": "ChestnutOne",
-  "disableScroll": true
+  "disableScroll": false,
+  "usingComponents": {
+    "invite-dialog": "/components/invite-dialog/invite-dialog"
+  }
 }
