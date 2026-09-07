@@ -45,7 +45,7 @@ button::after {
   height: 52rpx;
   place-items: center;
   color: white;
-  background: linear-gradient(145deg, #202124, #4b4d52);
+  background: linear-gradient(145deg, #a8632d, #6d351d);
   border-radius: 15rpx;
   box-shadow: 0 8rpx 22rpx rgba(0, 0, 0, 0.13);
   font-size: 23rpx;

@@ -1,10 +1,11 @@
 <view wx:if="{{visible}}" class="shade">
-  <view class="dialog" role="dialog" aria-label="邀请码验证">
-    <view class="title">开始使用 ChestnutOne</view>
-    <view class="hint">输入邀请码，继续使用会议翻译服务。</view>
-    <input password value="{{code}}" bindinput="input" placeholder="请输入邀请码" confirm-type="done" bindconfirm="submit" />
-    <view wx:if="{{error}}" class="error">{{error}}</view>
-    <button bindtap="submit" loading="{{busy}}" disabled="{{busy}}">验证并继续</button>
-    <button class="cancel" bindtap="cancel">暂不使用，继续浏览</button>
+  <view class="dialog" role="dialog" aria-label="Invitation code">
+    <view class="dialog-title">Start your meeting</view>
+    <view class="hint">Enter your invitation code to continue.</view>
+    <label class="input-label" for="invitation-code">Invitation code</label>
+    <input id="invitation-code" class="code-input" password value="{{code}}" bindinput="input" disabled="{{busy}}" placeholder="Enter invitation code" aria-label="Invitation code" confirm-type="done" bindconfirm="submit" cursor-spacing="24" adjust-position="{{true}}" />
+    <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+    <button class="verify" bindtap="submit" loading="{{busy}}" disabled="{{busy}}">{{busy ? 'Verifying…' : 'Verify and continue'}}</button>
+    <button class="cancel" bindtap="cancel">Not now</button>
   </view>
 </view>

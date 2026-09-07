@@ -1,17 +1,18 @@
 .setup-page {
   display: flex;
   flex-direction: column;
-  gap: 34rpx;
+  align-items: center;
 }
 
 .setup-card {
   width: 100%;
-  margin: auto 0;
-  padding: 52rpx 34rpx 38rpx;
+  max-width: 900rpx;
+  margin: 20rpx 0 0;
+  padding: 36rpx 28rpx 32rpx;
 }
 
 .settings {
-  margin: 48rpx 0 36rpx;
+  margin: 30rpx 0 28rpx;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.026);
   border: 1rpx solid var(--line);
@@ -94,12 +95,10 @@
   font-size: 24rpx;
 }
 
-.local-note {
-  margin-top: 22rpx;
-  color: #8a8a8f;
-  font-size: 18rpx;
-  letter-spacing: 1rpx;
-  text-align: center;
-}
-
-.service-features { color:#626269; font-size:13px; line-height:1.9; margin:16px 0; }
+.setup-brand { justify-content: center; margin-bottom: 26rpx; }
+.setup-card .title { font-size: 52rpx; letter-spacing: -2rpx; text-align: center; }
+.setup-card .subtitle { font-size: 24rpx; text-align: center; }
+.setup-card .primary-button { width: 100%; box-sizing: border-box; }
+.language-row { grid-template-columns: 62rpx minmax(0, 1fr); padding-top: 20rpx; padding-bottom: 20rpx; }
+.language-row picker { grid-column: 2; min-width: 0; }
+.language-row .setting-value { display: block; max-width: none; text-align: left; line-height: 1.5; overflow-wrap: anywhere; }
