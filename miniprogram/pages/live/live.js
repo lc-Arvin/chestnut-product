@@ -194,6 +194,13 @@ Page({
     }
 
     if (event.type === "error") {
+      if (event.retryable === false) {
+        this.socket.close();
+        this.readyForAudio = false;
+        recorder.pause();
+        this.setData({ isPaused: true, connectionState: "error", connectionMessage: event.error?.message || "请检查翻译服务配置后重新连接" });
+        return;
+      }
       this.handleServiceError({ message: event.error?.message || "百炼实时翻译返回错误" });
       return;
     }

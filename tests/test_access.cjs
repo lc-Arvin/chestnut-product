@@ -14,7 +14,7 @@ function web(fetch) {
     replaceChildren(...x){this.children=x;}, append(...x){this.children.push(...x);},
     classList:{contains:()=>false, toggle(){}, add(){}, remove(){}}, querySelector(){return element();} });
   const document = { querySelector(key){if(!elements.has(key)) elements.set(key,element());return elements.get(key);},createElement:element };
-  const c=vm.createContext({ document, fetch:(url,...args)=> url==='/api/languages' ? new Promise(()=>{}) : fetch(url,...args),
+  const c=vm.createContext({ document, fetch:(url,...args)=> url==='/api/languages' ? new Promise(()=>{}) : url==='/api/visits' ? Promise.resolve(response({recorded:true})) : fetch(url,...args),
     window:{setTimeout:fn=>fn(),localStorage:{getItem:()=> 'client-test-one'}}, URLSearchParams });
   vm.runInContext(source('app.js'),c);
   vm.runInContext('var audioStarts=0; beginAudioCheck=async()=>{audioStarts++}',c);
@@ -25,7 +25,8 @@ const response = (data, status=200)=>({ok:status>=200&&status<300,status,json:as
 test('Web landing is public; cancel preserves pair and does not start audio', async()=>{
   let calls=0;
   const {c,e,run}=web(async()=>{calls++;return response({auth_required:true,authenticated:false});});
-  assert.equal(calls,0);
+  assert.equal(calls,1); // Read status silently without opening the invitation dialog.
+  assert.equal(e.get('#access-gate').hidden,true);
   e.get('#language-first').value='yue';e.get('#language-second').value='zh';
   await c.initializeAccess();
   assert.equal(e.get('#access-gate').hidden,false);
@@ -48,6 +49,19 @@ test('Web wrong code stays in dialog; valid code continues once',async()=>{
   await c.submitInvitation({preventDefault(){}});
   assert.equal(run('audioStarts'),1);
   assert.equal(e.get('#access-gate').hidden,true);
+});
+
+test('Web invitation hint handles expiry, unlimited codes and unauthenticated access',()=>{
+  const {c,e}=web(async()=>response({authenticated:false}));
+  c.updateInvitationValidity({authenticated:true,invitation_expires_at:Date.parse('2030-01-02T03:04:00Z')/1000});
+  assert.equal(e.get('#invitation-validity').hidden,false);
+  assert.match(e.get('#invitation-validity-text').textContent,/02 Jan 2030, 11:04 \(UTC\+8\)/);
+  c.updateInvitationValidity({authenticated:true,invitation_expires_at:null});
+  assert.equal(e.get('#invitation-validity-text').textContent,'Invitation code · No expiry date');
+  c.updateInvitationValidity({authenticated:false,invitation_expires_at:null});
+  assert.equal(e.get('#invitation-validity').hidden,true);
+  c.updateInvitationValidity({authenticated:true});
+  assert.equal(e.get('#invitation-validity').hidden,true);
 });
 
 test('Web valid session bypasses dialog; cancellation ignores late verification',async()=>{
@@ -80,7 +94,7 @@ function miniSetup(access, save=async()=>{}) {
   state.reset();let page;const visits=[];let mic=0;
   const c=vm.createContext({Page:value=>page=value,wx:{getDeviceInfo:()=>({platform:'devtools'}),navigateTo:o=>visits.push(o.url),showToast(){},showModal(){}},
     require:name=> {
-      if(name.endsWith('/access'))return access;
+      if(name.endsWith('/access'))return {recordVisit:async()=>{},...access};
       if(name.endsWith('/meeting-api'))return {saveMeeting:save};
       if(name.endsWith('/meeting-state'))return state;
       if(name.endsWith('/languages'))return require('../miniprogram/utils/languages');
@@ -126,6 +140,58 @@ test('Mini cloud socket authenticates with first message and stops reconnect on 
   const socket=new c.module.exports();socket.connect();await Promise.resolve();open();
   assert.deepEqual(sent,[{type:'auth.authenticate',token:'signed-credential'}]);
   message({data:JSON.stringify({type:'access.denied'})});close();assert.equal(timers,0);
+});
+
+test('Web terminal translation error mutes audio, survives close, and allows manual reconnect',()=>{
+  const {c,e,run}=web(async()=>response({}));
+  c.clearTimeout=()=>{};
+  c.document.body={classList:{toggle(){}}};
+  c.location={protocol:'http:',host:'localhost'};
+  let timers=0;
+  c.window.setTimeout=()=>++timers;
+  const sockets=[];
+  c.WebSocket=class {
+    static OPEN=1;
+    constructor(){this.handlers={};sockets.push(this);}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    close(){this.readyState=3;this.handlers.close?.();}
+  };
+  run('var track={enabled:true}; microphoneStream={active:true,getAudioTracks:()=>[track]}; screens.live.classList.contains=()=>true; connectBailian()');
+  sockets[0].handlers.open();
+  sockets[0].handlers.message({data:JSON.stringify({type:'error',retryable:false,error:{message:'Configure Bailian credentials'}})});
+  sockets[0].handlers.error();
+  sockets[0].handlers.close();
+  c.scheduleRealtimeReconnect();
+  assert.equal(timers,0);
+  assert.equal(run('track.enabled'),false);
+  assert.equal(run('isPaused'),true);
+  assert.equal(e.get('#connection-label').textContent,'Configure Bailian credentials');
+  c.connectBailian();
+  assert.equal(sockets.length,2);
+  assert.equal(run('track.enabled'),true);
+  assert.equal(run('isPaused'),false);
+  sockets[1].handlers.open();
+  sockets[1].handlers.close();
+  assert.equal(timers,1);
+});
+
+test('Mini terminal translation errors do not reconnect or overwrite the error',async()=>{
+  for (const retryable of [false,true]) {
+    let message,close,onError,timers=0;
+    const states=[];
+    const task={onOpen(){},onMessage:fn=>message=fn,onClose:fn=>close=fn,onError:fn=>onError=fn,close(){}};
+    const c=vm.createContext({module:{exports:{}},setTimeout:()=>++timers,clearTimeout(){},
+      wx:{cloud:{connectContainer:async()=>({socketTask:task})}},
+      require:name=>name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,getServerHost:()=> 'localhost',CLOUD_SERVICE:'api'}});
+    vm.runInContext(source('miniprogram/services/meeting-socket.js'),c);
+    const socket=new c.module.exports();socket.subscribe('state',value=>states.push(value.state));
+    socket.connect();await Promise.resolve();
+    message({data:JSON.stringify({type:'error',retryable,error:{message:'test'}})});
+    onError({});close();
+    assert.equal(timers,retryable?1:0);
+    assert.equal(states.includes('reconnecting'),retryable);
+    socket.close();
+  }
 });
 
 test('Mini HTTP authorization persists credential and attaches it to save requests',async()=>{

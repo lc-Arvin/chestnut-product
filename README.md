@@ -9,6 +9,14 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 
 小程序的开发者工具导入、局域网调试和已知限制请阅读 [`miniprogram/README.md`](miniprogram/README.md)。开发进度见 [`docs/MINIPROGRAM_MVP_PLAN.md`](docs/MINIPROGRAM_MVP_PLAN.md)。
 
+## 本地管理后台
+
+在项目虚拟环境中执行 `python scripts/start_admin_local.py`，打开 `http://127.0.0.1:8080/admin`。Windows 可直接运行 `.\.venv\Scripts\python.exe scripts/start_admin_local.py`。首次打开时设置至少 12 个字符的独立管理员密码。
+
+后台支持批量生成 6 位数字邀请码、明文查看和复制、标签/备注搜索、快捷有效期、生成/失效时间排序、临近过期高亮、成功验证次数上限和停用/恢复，以及每日访问、按码使用情况和异常提示。活动记录自动合并重复接入，访问按日汇总，历史默认保留 90 天。数据持久保存在 `data/admin.sqlite3`，已排除 Git 和 Docker 打包。具体操作、统计口径、验证方式和本地边界见 [`docs/LOCAL_ADMIN.md`](docs/LOCAL_ADMIN.md)。
+
+后台默认关闭，不改变原有启动方式。使用本地管理启动器时将开启邀请码保护：即使没有生成码，也不会回退到免验证模式。管理页面仅允许直接从本机访问；这里的本地实验没有接入线上访问数据。
+
 当前版本包含完整的会议操作流程：
 
 - Meeting Setup

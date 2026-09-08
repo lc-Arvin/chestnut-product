@@ -78,7 +78,7 @@ class MeetingSocket {
         if (typeof data !== "string") return;
         try {
           const event = JSON.parse(data);
-          if (event.type === "access.denied" || event.type === "meeting.rejected") { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+          if (event.type === "access.denied" || event.type === "meeting.rejected" || (event.type === "error" && event.retryable === false)) { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
           if (event.type === "session.updated") this.reconnectAttempts = 0;
           this.emit("event", event);
         } catch (error) {
@@ -87,7 +87,7 @@ class MeetingSocket {
       });
 
       task.onError((error) => {
-        if (generation !== this.generation) return;
+        if (generation !== this.generation || this.intentionalClose) return;
         const serverHost = environment.getServerHost();
         const loopbackMessage = environment.isCloudEnabled()
           ? "无法连接云端翻译服务，请稍后重试"

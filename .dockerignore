@@ -9,3 +9,6 @@ sources
 miniprogram
 docs
 brand
+data
+logs
+test-results

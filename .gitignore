@@ -7,4 +7,6 @@ sources/
 AGENTS.md
 meetings/
 logs/
+data/
+test-results/
 miniprogram/project.private.config.json

@@ -52,6 +52,8 @@ const inviteCode = document.querySelector("#invite-code");
 const inviteVisibilityButton = document.querySelector("#invite-visibility-button");
 
 const startButton = document.querySelector("#start-button");
+const invitationValidity = document.querySelector("#invitation-validity");
+const invitationValidityText = document.querySelector("#invitation-validity-text");
 const continueButton = document.querySelector("#continue-button");
 const pauseButton = document.querySelector("#pause-button");
 const pauseLabel = document.querySelector("#pause-label");
@@ -100,6 +102,7 @@ let meetingRecords = [];
 let isPaused = false;
 let reconnectTimer;
 let reconnectAttempts = 0;
+let realtimeRetryBlocked = false;
 let droppedAudioFrames = 0;
 let stoppingMeeting = false;
 let meetingId;
@@ -118,6 +121,14 @@ function createClientId() {
   }
   return clientId;
 }
+
+async function recordServiceVisit() {
+  try {
+    await fetch("/api/visits", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: createClientId(), channel: "web" }) });
+  } catch { /* Analytics must never prevent public browsing or meetings. */ }
+}
+recordServiceVisit();
 
 function unlockConsole() {
   document.querySelector(".app-shell").inert = false;
@@ -139,6 +150,32 @@ let accessAttempt = 0;
 let pendingTranscript = null;
 let forceInvite = false;
 let savingTranscript = false;
+let invitationStatusVersion = 0;
+
+function updateInvitationValidity(status) {
+  const expiry = status.invitation_expires_at;
+  invitationValidity.hidden = !status.authenticated || expiry === undefined;
+  if (invitationValidity.hidden) return;
+  const remaining = expiry === null ? Infinity : expiry * 1000 - Date.now();
+  invitationValidity.classList.toggle("is-expiring", remaining <= 86400000);
+  if (expiry === null) {
+    invitationValidityText.textContent = "Invitation code · No expiry date";
+  } else {
+    const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(expiry * 1000));
+    invitationValidityText.textContent = `Invitation ${remaining <= 0 ? "expired" : "valid until"} ${date} (UTC+8)`;
+  }
+}
+
+async function refreshInvitationStatus() {
+  const version = ++invitationStatusVersion;
+  try {
+    const response = await fetch("/api/auth/status");
+    if (!response.ok) return;
+    const status = await response.json();
+    if (version === invitationStatusVersion) updateInvitationValidity(status);
+  } catch { /* A status hint must not block public browsing. */ }
+}
+
 async function initializeAccess(action = "start") {
   if (stoppingMeeting || savingTranscript || startButton.disabled) return;
   if (action === "start" && pendingTranscript) { await initializeAccess("save"); return; }
@@ -148,6 +185,8 @@ async function initializeAccess(action = "start") {
     const response = await fetch("/api/auth/status");
     if (!response.ok) throw new Error("Could not verify access. Please retry.");
     const status = await response.json();
+    invitationStatusVersion += 1;
+    updateInvitationValidity(status);
     if ((!status.auth_required || status.authenticated) && !forceInvite) await continueAfterAccess();
     else lockConsole();
   } catch (error) { lockConsole(error.message || "Could not reach the service. Please retry."); }
@@ -184,6 +223,8 @@ async function submitInvitation(event) {
     const result = await response.json();
     if (!response.ok || !result.authenticated) throw new Error(result.error || "Invitation code not accepted.");
     if (attempt !== accessAttempt) return;
+    invitationStatusVersion += 1;
+    updateInvitationValidity(result);
     forceInvite = false;
     inviteCode.value = "";
     setInviteVisibility(false);
@@ -211,6 +252,7 @@ function showScreen(name) {
   screens[name].classList.add("is-active");
   document.body.classList.toggle("is-live", name === "live");
   if (name !== "live") document.body.classList.remove("is-paused");
+  if (name === "setup") refreshInvitationStatus();
 }
 
 function resetAudioCheck() {
@@ -451,6 +493,17 @@ function handleRealtimeEvent(event) {
   }
 
   if (event.type === "error") {
+    if (event.retryable === false) {
+      realtimeRetryBlocked = true;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      connectingRealtime = false;
+      stopPcmStreaming();
+      isPaused = true;
+      microphoneStream?.getAudioTracks().forEach((track) => { track.enabled = false; });
+      updatePauseState();
+      bailianSocket?.close();
+    }
     setConnectionState("error", event.error?.message || "Live translation encountered an error");
   }
 }
@@ -508,7 +561,7 @@ function stopPcmStreaming() {
 }
 
 function scheduleRealtimeReconnect() {
-  if (reconnectTimer || stoppingMeeting || isPaused || !microphoneStream?.active || !screens.live.classList.contains("is-active")) return;
+  if (realtimeRetryBlocked || reconnectTimer || stoppingMeeting || isPaused || !microphoneStream?.active || !screens.live.classList.contains("is-active")) return;
   const delay = Math.min(1000 * (2 ** reconnectAttempts), 10000);
   reconnectAttempts += 1;
   setConnectionState("connecting", `Translation disconnected · Reconnecting in ${Math.ceil(delay / 1000)}s…`);
@@ -520,6 +573,12 @@ function scheduleRealtimeReconnect() {
 
 function connectBailian() {
   if (connectingRealtime || !microphoneStream?.active) return;
+  if (realtimeRetryBlocked) {
+    realtimeRetryBlocked = false;
+    isPaused = false;
+    microphoneStream.getAudioTracks().forEach((track) => { track.enabled = true; });
+    updatePauseState();
+  }
   clearTimeout(reconnectTimer);
   reconnectTimer = undefined;
   connectingRealtime = true;
@@ -542,12 +601,12 @@ function connectBailian() {
     connectingRealtime = false;
   });
   socket.addEventListener("error", () => {
-    if (bailianSocket !== socket) return;
+    if (bailianSocket !== socket || realtimeRetryBlocked) return;
     connectingRealtime = false;
     setConnectionState("connecting", "Live translation connection failed · Recovering…");
   });
   socket.addEventListener("close", () => {
-    if (bailianSocket !== socket) return;
+    if (bailianSocket !== socket || realtimeRetryBlocked) return;
     connectingRealtime = false;
     stopPcmStreaming();
     if (isPaused && screens.live.classList.contains("is-active")) {
@@ -568,6 +627,7 @@ function updatePauseState() {
 
 function togglePause() {
   if (!screens.live.classList.contains("is-active") || !microphoneStream?.active) return;
+  if (realtimeRetryBlocked) { connectBailian(); return; }
   isPaused = !isPaused;
   microphoneStream.getAudioTracks().forEach((track) => { track.enabled = !isPaused; });
   updatePauseState();
@@ -591,6 +651,7 @@ async function beginMeeting() {
   reconnectTimer = undefined;
   reconnectAttempts = 0;
   droppedAudioFrames = 0;
+  realtimeRetryBlocked = false;
   stoppingMeeting = false;
   meetingId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   meetingSeconds = 0;
@@ -737,3 +798,4 @@ continueButton.addEventListener("click", beginMeeting);
 pauseButton.addEventListener("click", togglePause);
 stopButton.addEventListener("click", () => stopMeeting());
 retryButton.addEventListener("click", connectBailian);
+refreshInvitationStatus();

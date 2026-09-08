@@ -31,6 +31,15 @@
 .invite-visibility-button[aria-pressed="true"] .eye-icon-hidden { display: none; }
 .access-error { margin: 0 0 14px; color: var(--red); font-size: 13px; }
 .access-card .primary-button { width: 100%; }
+.access-browse { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; margin-top: 14px; padding: 10px 18px; border: 0; border-radius: 12px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 500; cursor: pointer; transition: color .18s, background .18s; }
+.access-browse span { font-size: 15px; }
+.access-browse:hover { color: var(--text); background: #f5f5f7; }
+.access-browse:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.access-browse:active { background: #ededf0; }
+.invitation-validity { display: flex; align-items: flex-start; justify-content: center; gap: 7px; margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.invitation-validity[hidden] { display: none; }
+.invitation-validity svg { flex: 0 0 15px; width: 15px; height: 15px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.invitation-validity.is-expiring { color: #985b13; }
 
 * { box-sizing: border-box; }
 
@@ -392,4 +401,3 @@ body.is-live .live-status { margin: 10px 0 0; }
   .setup-panel .setting-row select, .setup-panel .setting-row .status-dot-label { grid-column: 3; justify-self: end; text-align: right; }
   .setup-panel select { min-width: 0; width: 100%; padding: 8px 0; font-size: 13px; }
 }
-#access-cancel { margin-top:12px; width:100%; }

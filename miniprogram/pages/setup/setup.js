@@ -33,6 +33,7 @@ Page({
   },
 
   onShow() {
+    access.recordVisit();
     recorder.stop();
     this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;

@@ -20,11 +20,19 @@ async function authorized() {
   const status = await request("/api/auth/status");
   return !status.auth_required || status.authenticated;
 }
-async function login(code) {
+function clientId() {
   let client = wx.getStorageSync("chestnut_client_id");
   if (!client) { client = `${Date.now()}-${Math.random().toString(36).slice(2)}`; wx.setStorageSync("chestnut_client_id", client); }
+  return client;
+}
+async function recordVisit() {
+  try { await request("/api/visits", "POST", { client_id: clientId(), channel: "miniprogram" }); }
+  catch { /* Analytics must not block the service page. */ }
+}
+async function login(code) {
+  const client = clientId();
   const result = await request("/api/auth/invite", "POST", { code, client_id: client, client_type: "miniprogram" });
   if (result.access_token) wx.setStorageSync(key(), result.access_token);
   else if (result.auth_required !== false) throw new Error("验证未完成，请重试");
 }
-module.exports = { token, clear, request, authorized, login };
+module.exports = { token, clear, request, authorized, login, recordVisit };

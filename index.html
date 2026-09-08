@@ -33,7 +33,7 @@
         </label>
         <p class="access-error" id="access-error" role="alert" hidden></p>
         <button class="primary-button" id="access-button" type="submit">Continue <span aria-hidden="true">→</span></button>
-        <button id="access-cancel" class="secondary-button" type="button">Not now · Continue browsing</button>
+        <button id="access-cancel" class="access-browse" type="button">Continue browsing <span aria-hidden="true">→</span></button>
       </form>
     </section>
 
@@ -95,6 +95,10 @@
           <button class="primary-button" id="start-button" type="button">
             Start Meeting <span aria-hidden="true">→</span>
           </button>
+          <p class="invitation-validity" id="invitation-validity" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></svg>
+            <span id="invitation-validity-text"></span>
+          </p>
           <div class="meeting-save-notice" id="meeting-save-notice" hidden>
             <span class="save-check" aria-hidden="true">✓</span>
             <span id="meeting-save-message">Meeting transcript saved.</span>

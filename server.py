@@ -26,6 +26,9 @@ from aiohttp import WSMsgType, web
 from qcloud_cos import CosConfig, CosS3Client
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
+from admin_store import AdminStore
+from admin_http import STORE_KEY, admin_boundary, mount_admin
+from local_config import load_bailian_credentials
 
 
 HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
@@ -102,6 +105,8 @@ class ClientIdentity:
     subject: str
     kind: str
     label: str = ""
+    code_id: str = ""
+    code_version: int = 0
 
 
 class SlidingWindowLimiter:
@@ -141,6 +146,7 @@ class MeetingRegistry:
             if existing:
                 previous = existing["socket"]
             self.active[identity.subject] = {
+                "identity": identity,
                 "session_key": session_key,
                 "meeting_id": meeting_id,
                 "socket": socket,
@@ -198,37 +204,50 @@ def base64url_decode(value):
     return base64.urlsafe_b64decode(f"{value}{padding}")
 
 
-def token_signature(payload):
-    return base64url_encode(hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).digest())
+def token_signature(payload, signing_secret=None):
+    secret = AUTH_SECRET if signing_secret is None else signing_secret
+    return base64url_encode(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest())
 
 
-def issue_access_token(client_id, invite_label="invite", wechat_openid=""):
+def client_subject(client_id, wechat_openid="", signing_secret=None):
+    secret = AUTH_SECRET if signing_secret is None else signing_secret
+    subject_digest = hmac.new(secret.encode(), client_id.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"wechat-{safe_owner_id(wechat_openid)}" if wechat_openid else f"web-{subject_digest}"
+
+
+def issue_access_token(client_id, invite_label="invite", wechat_openid="", *, signing_secret=None, code_id="", code_version=0):
     now = int(time.time())
-    subject_digest = hmac.new(AUTH_SECRET.encode(), client_id.encode(), hashlib.sha256).hexdigest()[:32]
+    secret = AUTH_SECRET if signing_secret is None else signing_secret
     payload = base64url_encode(json.dumps({
-        "sub": f"wechat-{safe_owner_id(wechat_openid)}" if wechat_openid else f"web-{subject_digest}",
+        "sub": client_subject(client_id, wechat_openid, secret),
         "kind": "wechat" if wechat_openid else "web",
         "label": safe_invite_label(invite_label),
         "iat": now,
         "exp": now + WEB_TOKEN_TTL_SECONDS,
+        "code_id": code_id,
+        "code_version": code_version,
     }, separators=(",", ":")).encode())
-    return f"{payload}.{token_signature(payload)}"
+    return f"{payload}.{token_signature(payload, secret)}"
 
 
-def verify_access_token(token):
-    if not token or not AUTH_SECRET:
+def verify_access_token(token, signing_secret=None):
+    secret = AUTH_SECRET if signing_secret is None else signing_secret
+    if not isinstance(token, str) or not token or not secret:
         return None
     try:
         payload, signature = token.split(".", 1)
-        if not hmac.compare_digest(signature, token_signature(payload)):
+        if not hmac.compare_digest(signature, token_signature(payload, secret)):
             return None
         claims = json.loads(base64url_decode(payload))
+        if not isinstance(claims, dict):
+            return None
         if int(claims.get("exp", 0)) <= int(time.time()):
             return None
         subject = safe_owner_id(claims.get("sub"))
         if not subject or claims.get("kind") not in {"web", "wechat"}:
             return None
-        return ClientIdentity(subject=subject, kind=claims["kind"], label=safe_invite_label(claims.get("label")))
+        return ClientIdentity(subject=subject, kind=claims["kind"], label=safe_invite_label(claims.get("label")),
+                              code_id=claims.get("code_id", ""), code_version=claims.get("code_version", 0))
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
 
@@ -247,19 +266,35 @@ def request_token(request):
 
 def request_identity(request, token=None):
     wechat_openid = request.headers.get("x-wx-openid", "").strip()
-    identity = verify_access_token(request_token(request) if token is None else token)
+    store = request.app.get(STORE_KEY)
+    identity = verify_access_token(request_token(request) if token is None else token,
+                                   AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
+    if store and identity and not store.token_valid(identity.code_id, identity.code_version):
+        identity = None
     if wechat_openid:
         subject = f"wechat-{safe_owner_id(wechat_openid)}"
         if identity and identity.kind == "wechat" and identity.subject == subject:
             return identity
-        if not AUTH_REQUIRED:
+        if not authentication_required(request):
             return ClientIdentity(subject=subject, kind="wechat")
         return None
     if identity and identity.kind == "web":
         return identity
-    if not AUTH_REQUIRED:
+    if not authentication_required(request):
         return ClientIdentity(subject="local-anonymous", kind="local")
     return None
+
+
+def authentication_required(request):
+    return AUTH_REQUIRED or STORE_KEY in request.app
+
+
+def record_activity(request, kind, identity=None, reason="", meeting=""):
+    store = request.app.get(STORE_KEY)
+    if store:
+        store.record(kind, code_id=identity.code_id if identity else "",
+                     client=identity.subject if identity else "", ip=request_ip(request),
+                     channel=identity.kind if identity else "web", reason=reason, meeting=meeting)
 
 
 def origin_is_allowed(request):
@@ -649,13 +684,14 @@ async def handle_browser(browser, meeting_limit_enabled=True, language_pair=DEFA
     first_language, second_language = language_pair
     metrics = SessionMetrics()
     LOGGER.info("session=%s event=browser_connected", metrics.session_id)
-    api_key = os.environ.get("DASHSCOPE_API_KEY")
-    api_host = os.environ.get("BAILIAN_API_HOST")
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
+    api_host = os.environ.get("BAILIAN_API_HOST", "").strip()
     if not api_key or not api_host:
         LOGGER.error("session=%s event=credentials_missing", metrics.session_id)
         await browser.send(json.dumps({
             "type": "error",
-            "error": {"message": "Bailian credentials are not configured. Restart Chestnut and enter your API key and host."},
+            "retryable": False,
+            "error": {"code": "credentials_missing", "message": "Bailian credentials are missing. Configure DASHSCOPE_API_KEY and BAILIAN_API_HOST in the server's .env or environment, then restart the service and reconnect."},
         }))
         await browser.close()
         return
@@ -786,7 +822,7 @@ async def handle_browser(browser, meeting_limit_enabled=True, language_pair=DEFA
             metrics.summary(),
         )
         try:
-            await browser.send(json.dumps({"type": "error", "error": {"message": message}}))
+            await browser.send(json.dumps({"type": "error", "retryable": status not in (401, 403), "error": {"code": "cloud_connection_rejected", "message": message}}))
         except Exception:
             pass
     except Exception as error:
@@ -814,12 +850,17 @@ async def health_handler(_request):
 
 
 async def auth_status_handler(request):
-    return web.json_response({
-        "auth_required": AUTH_REQUIRED,
-        "authenticated": request_identity(request) is not None,
+    identity = request_identity(request)
+    result = {
+        "auth_required": authentication_required(request),
+        "authenticated": identity is not None,
         "max_meeting_seconds": MAX_MEETING_SECONDS,
         "meeting_warning_seconds": MEETING_WARNING_SECONDS,
-    }, headers={"Cache-Control": "no-store"})
+    }
+    if identity and result["auth_required"]:
+        store = request.app.get(STORE_KEY)
+        result["invitation_expires_at"] = store.invitation_expiry(identity.code_id) if store else None
+    return web.json_response(result, headers={"Cache-Control": "no-store"})
 
 
 async def invite_auth_handler(request):
@@ -828,8 +869,9 @@ async def invite_auth_handler(request):
         raise web.HTTPForbidden(text="Origin not allowed")
     if not LOGIN_LIMITER.allow(ip):
         LOGGER.warning("event=invite_rate_limited ip=%s", ip)
+        record_activity(request, "invite_rate_limited")
         return web.json_response({"error": "Too many attempts. Please wait before trying again."}, status=429)
-    if not AUTH_REQUIRED:
+    if not authentication_required(request):
         return web.json_response({"auth_required": False})
     try:
         payload = await request.json()
@@ -839,13 +881,28 @@ async def invite_auth_handler(request):
         return web.json_response({"error": "Invalid request."}, status=400)
     code = payload.get("code", "")
     client_id = str(payload.get("client_id", "")).strip()
-    invite_label = invitation_label(code)
-    if len(client_id) < 8 or len(client_id) > 200 or not invite_label:
+    if not 8 <= len(client_id) <= 200 or not isinstance(code, str) or len(code) > 200:
+        return web.json_response({"error": "Invalid request."}, status=400)
+    store = request.app.get(STORE_KEY)
+    openid = request.headers.get("x-wx-openid", "").strip()
+    managed_code = None
+    if store:
+        # Stable Web and WeChat subjects match visit/event pseudonyms.
+        subject = client_subject(client_id, openid, AUTH_SECRET or store.signing_secret)
+        managed_code = store.redeem(code, subject, ip, "wechat" if openid else "web")
+        invite_label = managed_code["label"] if managed_code else None
+    else:
+        invite_label = invitation_label(code)
+    if not invite_label:
         LOGGER.warning("event=invite_rejected ip=%s", ip)
         return web.json_response({"error": "Invitation code not accepted."}, status=401)
-    token = issue_access_token(client_id, invite_label, request.headers.get("x-wx-openid", "").strip())
+    token = issue_access_token(client_id, invite_label, openid,
+                               signing_secret=AUTH_SECRET or store.signing_secret if store else AUTH_SECRET,
+                               code_id=managed_code["id"] if managed_code else "",
+                               code_version=managed_code["version"] if managed_code else 0)
     LOGGER.info("event=invite_accepted ip=%s", ip)
-    result = {"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS}
+    result = {"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS,
+              "invitation_expires_at": managed_code["expires_at"] if managed_code else None}
     if payload.get("client_type") == "miniprogram":
         result["access_token"] = token
     response = web.json_response(result, headers={"Cache-Control": "no-store"})
@@ -870,6 +927,43 @@ async def logout_handler(request):
     response = web.json_response({"authenticated": False})
     response.del_cookie("chestnut_access", path="/")
     return response
+
+
+async def visit_handler(request):
+    # Best-effort product-page analytics, never a prerequisite for a meeting.
+    store = request.app.get(STORE_KEY)
+    if not store:
+        return web.json_response({"recorded": False})
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
+    try:
+        if request.content_length and request.content_length > 2048:
+            raise ValueError()
+        raw = await request.read()
+        if len(raw) > 2048:
+            raise ValueError()
+        payload = json.loads(raw)
+        client_id = payload.get("client_id", "")
+        if not isinstance(client_id, str) or not 8 <= len(client_id) <= 200:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        return web.json_response({"error": "Invalid request."}, status=400)
+    if not request.app[VISIT_LIMITER_KEY].allow(request_ip(request)):
+        return web.json_response({"recorded": False}, status=429)
+    openid = request.headers.get("x-wx-openid", "").strip()
+    subject = client_subject(client_id, openid, AUTH_SECRET or store.signing_secret)
+    channel = "wechat" if openid else "miniprogram" if payload.get("channel") == "miniprogram" else "web"
+    store.record("visit", client=subject, ip=request_ip(request), channel=channel)
+    return web.json_response({"recorded": True}, headers={"Cache-Control": "no-store"})
+
+
+async def guard_managed_access(browser, store, identity):
+    while True:
+        await asyncio.sleep(2)
+        if not store.token_valid(identity.code_id, identity.code_version):
+            await browser.send(json.dumps({"type": "access.denied", "error": {"message": "Invitation access is no longer available."}}))
+            await browser.close()
+            return
 
 
 async def websocket_handler(request):
@@ -897,6 +991,7 @@ async def websocket_handler(request):
         except (ValueError, TypeError, asyncio.TimeoutError):
             identity = None
     if not identity:
+        record_activity(request, "access_denied", reason="websocket")
         await browser.send(json.dumps({
             "type": "access.denied",
             "error": {"message": "Your access has expired. Enter the invitation code again."},
@@ -904,6 +999,7 @@ async def websocket_handler(request):
         await socket.close(code=1008, message=b"Authentication required")
         return socket
     if not CONNECTION_LIMITER.allow(f"{identity.subject}:{ip}"):
+        record_activity(request, "connection_limited", identity)
         await browser.send(json.dumps({
             "type": "connection.rate_limited",
             "message": "Too many connection attempts. Please wait and try again.",
@@ -921,18 +1017,26 @@ async def websocket_handler(request):
     meeting_id = safe_owner_id(request.query.get("meeting_id"))
     session_key, previous_socket, error = await MEETING_REGISTRY.acquire(identity, meeting_id, browser)
     if error:
+        record_activity(request, "meeting_rejected", identity, reason=error, meeting=meeting_id)
         await browser.send(json.dumps({"type": "meeting.rejected", "message": error}))
         await socket.close(code=1008, message=b"Meeting unavailable")
         return socket
     if previous_socket:
         await previous_socket.close()
     LOGGER.info("event=meeting_admitted owner=%s kind=%s meeting=%s", identity.subject, identity.kind, meeting_id)
+    record_activity(request, "meeting_started", identity, meeting=meeting_id)
+    store = request.app.get(STORE_KEY)
+    access_guard = asyncio.create_task(guard_managed_access(browser, store, identity)) if store else None
     try:
         # Browser and WeChat cloud meetings both understand the warning and
         # expiry events. Unauthenticated local/LAN development remains
         # unlimited so it preserves the original desktop workflow.
         await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity), language_pair=language_pair)
     finally:
+        if access_guard:
+            access_guard.cancel()
+            await asyncio.gather(access_guard, return_exceptions=True)
+        record_activity(request, "meeting_ended", identity, meeting=meeting_id)
         await MEETING_REGISTRY.release(identity, session_key)
         if not socket.closed:
             await socket.close()
@@ -954,6 +1058,7 @@ async def save_meeting_handler(request):
         payload = json.loads(raw)
         filename_label = identity.label if identity.kind == "web" else ""
         saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
+        record_activity(request, "transcript_saved", identity)
         LOGGER.info(
             "event=transcript_saved storage=%s entries=%d filename=%s",
             saved["storage"],
@@ -1011,12 +1116,32 @@ def validate_configuration():
         raise RuntimeError("CHESTNUT_MAX_CONCURRENT_MEETINGS must be zero or greater")
 
 
-def create_app():
+VISIT_LIMITER_KEY = web.AppKey("visit_limiter", SlidingWindowLimiter)
+
+
+def create_app(*, admin_path=None):
     validate_configuration()
-    app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES)
+    app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES, middlewares=[admin_boundary])
+    if admin_path is not None or os.environ.get("CHESTNUT_ADMIN_ENABLED") == "1":
+        if WEB_TOKEN_TTL_SECONDS <= 0:
+            raise RuntimeError("CHESTNUT_WEB_TOKEN_TTL_SECONDS must be greater than zero")
+        store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
+
+        async def code_changed(code_id):
+            for entry in list(MEETING_REGISTRY.active.values()):
+                identity = entry["identity"]
+                if identity.code_id == code_id and not store.token_valid(code_id, identity.code_version):
+                    try:
+                        await entry["socket"].send(json.dumps({"type": "access.denied", "error": {"message": "Invitation access was disabled."}}))
+                        await entry["socket"].close()
+                    except Exception:
+                        LOGGER.warning("event=admin_socket_close_failed")
+        mount_admin(app, store, code_changed)
+        app[VISIT_LIMITER_KEY] = SlidingWindowLimiter(120, 60)
     app.router.add_get("/api/languages", languages_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/api/auth/status", auth_status_handler)
+    app.router.add_post("/api/visits", visit_handler)
     app.router.add_post("/api/auth/invite", invite_auth_handler)
     app.router.add_post("/api/auth/logout", logout_handler)
     app.router.add_get("/ws", websocket_handler)
@@ -1027,6 +1152,7 @@ def create_app():
 
 
 def main():
+    load_bailian_credentials()
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
     LOGGER.info("event=service_started url=http://%s:%d", display_host, PORT)
     if HOST == "0.0.0.0":
