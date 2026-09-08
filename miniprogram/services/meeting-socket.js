@@ -11,6 +11,7 @@ class MeetingSocket {
     this.generation = 0;
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
+    this.meetingId = access.trialInfo?.()?.meeting_id || "";
   }
 
   subscribe(event, listener) {
@@ -46,7 +47,8 @@ class MeetingSocket {
       message: environment.isCloudEnabled() ? "正在连接云端翻译服务…" : "正在连接本地翻译服务…",
     });
 
-    const query = `?auth=message&meeting_id=${encodeURIComponent(meetingState.state.startedAt || "mini-meeting")}&languages=${encodeURIComponent(this.languagePair.join(","))}`;
+    this.meetingId = this.meetingId || meetingState.state.startedAt || "mini-meeting";
+    const query = `?auth=message&meeting_id=${encodeURIComponent(this.meetingId)}&languages=${encodeURIComponent(this.languagePair.join(","))}`;
     const connection = environment.isCloudEnabled()
       ? wx.cloud.connectContainer({
           service: environment.CLOUD_SERVICE,
@@ -78,7 +80,7 @@ class MeetingSocket {
         if (typeof data !== "string") return;
         try {
           const event = JSON.parse(data);
-          if (event.type === "access.denied" || event.type === "meeting.rejected" || (event.type === "error" && event.retryable === false)) { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+          if (event.type === "access.denied" || event.type === "meeting.rejected" || event.type === "trial.ended" || (event.type === "error" && event.retryable === false)) { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
           if (event.type === "session.updated") this.reconnectAttempts = 0;
           this.emit("event", event);
         } catch (error) {

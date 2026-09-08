@@ -7,6 +7,7 @@ const initialState = () => ({
   entries: [],
   lastResult: null,
   pendingPayload: null,
+  trialComplete: false,
 });
 
 const state = initialState();

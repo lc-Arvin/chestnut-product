@@ -126,7 +126,7 @@ class AdminIntegrationTests(unittest.IsolatedAsyncioTestCase):
             headers = {"Authorization": "Bearer " + auth["access_token"]}
             status = await (await self.client.get("/api/auth/status", headers=headers)).json()
             self.assertEqual(status["invitation_expires_at"], expiry)
-            self.assertEqual(set(status), {"auth_required", "authenticated", "max_meeting_seconds", "meeting_warning_seconds", "invitation_expires_at"})
+            self.assertEqual(set(status), {"auth_required", "authenticated", "max_meeting_seconds", "meeting_warning_seconds", "invitation_expires_at", "access_mode", "trial"})
             await self.client.patch(f"/api/admin/codes/{code['id']}", json={"enabled": False}, headers=self.headers)
             status = await (await self.client.get("/api/auth/status", headers=headers)).json()
             self.assertFalse(status["authenticated"])

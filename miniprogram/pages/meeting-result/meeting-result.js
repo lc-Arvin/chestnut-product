@@ -15,6 +15,7 @@ Page({
     const result = meetingState.state.lastResult || {};
     this.setData({
       saved: Boolean(result.saved),
+      trial: Boolean(result.trial),
       duration: result.duration || "00:00:00",
       entryCount: result.entryCount || 0,
       filename: result.filename || "Not saved",

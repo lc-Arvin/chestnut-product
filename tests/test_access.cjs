@@ -75,6 +75,69 @@ test('Web valid session bypasses dialog; cancellation ignores late verification'
   assert.equal(pending.run('audioStarts'),0);
 });
 
+test('Web trial entry claims once without a code and does not start after cancellation',async()=>{
+  for (const cancel of [false,true]) {
+    let resolveClaim,claims=0;
+    const {c,e,run}=web(async url=>url.endsWith('/status') ? response({auth_required:true,authenticated:false,trial:{enabled:true,available:true,duration_seconds:180}}) : new Promise(resolve=>{claims++;resolveClaim=resolve;}));
+    await c.initializeAccess();
+    assert.equal(e.get('#trial-button').disabled,false);
+    const pending=c.startTrial();
+    await c.startTrial();
+    assert.equal(claims,1);
+    if(cancel)c.cancelAccess();
+    resolveClaim(response({authenticated:true,access_mode:'trial',trial:{enabled:true,available:false,state:'ready',duration_seconds:180,meeting_id:'trial-one'}}));
+    await pending;
+    assert.equal(run('audioStarts'),cancel?0:1);
+    assert.equal(e.get('#invite-code').value,'');
+  }
+});
+
+test('Web ended trial cannot be reclaimed and saves its transcript during grace without a code',async()=>{
+  const {c,e,run}=web(async url=>url.endsWith('/status') ? response({auth_required:true,authenticated:false,access_mode:'trial',trial:{enabled:true,available:false,state:'ended',duration_seconds:180,meeting_id:'trial-one'}}) : response({filename:'saved.md'}));
+  await c.initializeAccess();
+  assert.equal(e.get('#trial-button').disabled,true);
+  assert.equal(e.get('#access-title').textContent,'Your trial is complete');
+  run('pendingTranscript={meeting_id:"trial-one",entries:[{text:"hello"}]}');
+  await c.initializeAccess('save');
+  assert.equal(run('pendingTranscript'),null);
+  assert.equal(run('audioStarts'),0);
+});
+
+test('Web trial countdown expires even while paused',()=>{
+  const {c,e,run}=web(async()=>response({}));
+  run('var trialStops=0; stopMeeting=()=>{trialStops++}; trialAccess={duration_seconds:180}; trialLocalDeadline=Date.now()-1; isPaused=true;');
+  c.updateTrialCountdown();
+  assert.equal(run('trialStops'),1);
+  assert.equal(e.get('#trial-badge').textContent,'Trial · 00:00');
+});
+
+test('Mini trial entry submits once and ignores completion after cancel',async()=>{
+  let component,finish,claims=0;const events=[];
+  const c=vm.createContext({Component:value=>component=value,require:()=>({startTrial:()=>{claims++;return new Promise(resolve=>finish=resolve);}})});
+  vm.runInContext(source('miniprogram/components/invite-dialog/invite-dialog.js'),c);
+  const dialog={...component.methods,data:{busy:false,trialAllowed:true},setData(x){Object.assign(this.data,x);},triggerEvent:x=>events.push(x)};
+  const pending=dialog.startTrial();await dialog.startTrial();
+  assert.equal(claims,1);
+  dialog.cancel();finish();await pending;
+  assert.deepEqual(events,['cancel']);
+});
+
+test('Mini trial countdown expires while paused and reconnect retains the assigned meeting',async()=>{
+  let page,stops=0;
+  const c=vm.createContext({Page:value=>page=value,require:name=>name.endsWith('/layout')?{safeTopPadding:()=>0}:name.endsWith('/time')?{formatTime:seconds=>`00:00:${String(seconds).padStart(2,'0')}`}:{}});
+  vm.runInContext(source('miniprogram/pages/live/live.js'),c);
+  page.data={isPaused:true,ending:false};page.setData=data=>Object.assign(page.data,data);page.stopMeeting=()=>stops++;
+  page.trial={duration_seconds:180};page.trialDeadline=Date.now()-1;
+  page.updateTrialCountdown();assert.equal(stops,1);assert.equal(page.data.trialTime,'00:00');
+  const paths=[];
+  const task={onOpen(){},onMessage(){},onClose(){},onError(){},close(){}};
+  const s=vm.createContext({module:{exports:{}},setTimeout,clearTimeout,wx:{cloud:{connectContainer:async opts=>{paths.push(opts.path);return {socketTask:task};}}},
+    require:name=>name.endsWith('/access')?{trialInfo:()=>({meeting_id:'trial-fixed'})}:name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,CLOUD_SERVICE:'api'}});
+  vm.runInContext(source('miniprogram/services/meeting-socket.js'),s);
+  const socket=new s.module.exports();socket.connect();await Promise.resolve();socket.connect();await Promise.resolve();
+  assert.ok(paths.every(p=>p.includes('meeting_id=trial-fixed')));socket.close();
+});
+
 test('Web failed save survives login and retries original payload without audio',async()=>{
   let fail=true;const bodies=[];
   const {c,run}=web(async(url,opts)=>{

@@ -6,6 +6,11 @@
     <input id="invitation-code" class="code-input" password value="{{code}}" bindinput="input" disabled="{{busy}}" placeholder="Enter invitation code" aria-label="Invitation code" confirm-type="done" bindconfirm="submit" cursor-spacing="24" adjust-position="{{true}}" />
     <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
     <button class="verify" bindtap="submit" loading="{{busy}}" disabled="{{busy}}">{{busy ? 'Verifying…' : 'Verify and continue'}}</button>
+    <view wx:if="{{trialEnabled && allowTrial}}" class="trial-entry">
+      <view class="trial-divider">{{trialAllowed ? 'Try ChestnutOne' : 'Trial access'}}</view>
+      <button class="trial" bindtap="startTrial" disabled="{{busy || !trialAllowed}}">{{trialLabel}} {{trialAllowed ? '→' : ''}}</button>
+      <view class="trial-note">{{trialAllowed ? 'No code needed. Starts when translation connects. Pauses count toward trial time.' : 'Enter an invitation code above to keep translating.'}}</view>
+    </view>
     <button class="cancel" bindtap="cancel">Not now</button>
   </view>
 </view>

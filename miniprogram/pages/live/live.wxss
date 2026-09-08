@@ -464,3 +464,5 @@
     grid-template-rows: minmax(0, 1fr);
   }
 }
+.trial-badge { flex-shrink: 0; padding: 4px 8px; border-radius: 8px; background: #eef6ff; color: #0064c9; font-size: 12px; font-weight: 600; }
+.trial-ending { background: #fff7e8; color: #985b13; }

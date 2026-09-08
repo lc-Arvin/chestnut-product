@@ -38,6 +38,11 @@ Page({
     this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;
     this.setData({ serverHost: environment.getServerHost(), languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
+    if (meetingState.state.trialComplete) {
+      meetingState.state.trialComplete = false;
+      this.action = this.data.pendingSave ? "save" : "start";
+      this.setData({ inviteVisible: true });
+    }
   },
 
   handleLanguageChange(event) {
@@ -75,7 +80,9 @@ Page({
     this.setData({ busy: true });
     this.action = action;
     try {
-      if (await access.authorized()) await this.verified();
+      const authorized = await access.authorized();
+      const canSaveTrial = action === "save" && access.trialInfo?.()?.meeting_id === meetingState.state.pendingPayload?.meeting_id && Boolean(meetingState.state.pendingPayload?.meeting_id);
+      if (authorized || canSaveTrial) await this.verified();
       else this.setData({ inviteVisible: true });
     } catch (error) { wx.showToast({ title: "无法连接服务，请重试", icon: "none" }); }
     finally { this.setData({ busy: false }); }

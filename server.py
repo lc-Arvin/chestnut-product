@@ -29,6 +29,7 @@ from websockets.exceptions import InvalidStatus
 from admin_store import AdminStore
 from admin_http import STORE_KEY, admin_boundary, mount_admin
 from local_config import load_bailian_credentials
+from trial_access import TrialRegistry, TrialSocket, enforce_trial
 
 
 HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
@@ -85,6 +86,7 @@ def parse_web_invitations(value):
 WEB_INVITATIONS = parse_web_invitations(os.environ.get("CHESTNUT_WEB_INVITE_CODES", ""))
 AUTH_SECRET = os.environ.get("CHESTNUT_AUTH_SECRET", "").strip()
 AUTH_REQUIRED = bool(WEB_INVITATIONS)
+TRIAL_SECONDS = int(os.environ.get("CHESTNUT_TRIAL_SECONDS", "180"))
 WEB_TOKEN_TTL_SECONDS = int(os.environ.get("CHESTNUT_WEB_TOKEN_TTL_SECONDS", "43200"))
 MAX_MEETING_SECONDS = int(os.environ.get("CHESTNUT_MAX_MEETING_SECONDS", "3600"))
 MEETING_WARNING_SECONDS = int(os.environ.get("CHESTNUT_MEETING_WARNING_SECONDS", "300"))
@@ -107,6 +109,7 @@ class ClientIdentity:
     label: str = ""
     code_id: str = ""
     code_version: int = 0
+    trial_id: str = ""
 
 
 class SlidingWindowLimiter:
@@ -215,7 +218,7 @@ def client_subject(client_id, wechat_openid="", signing_secret=None):
     return f"wechat-{safe_owner_id(wechat_openid)}" if wechat_openid else f"web-{subject_digest}"
 
 
-def issue_access_token(client_id, invite_label="invite", wechat_openid="", *, signing_secret=None, code_id="", code_version=0):
+def issue_access_token(client_id, invite_label="invite", wechat_openid="", *, signing_secret=None, code_id="", code_version=0, trial_id=""):
     now = int(time.time())
     secret = AUTH_SECRET if signing_secret is None else signing_secret
     payload = base64url_encode(json.dumps({
@@ -223,9 +226,10 @@ def issue_access_token(client_id, invite_label="invite", wechat_openid="", *, si
         "kind": "wechat" if wechat_openid else "web",
         "label": safe_invite_label(invite_label),
         "iat": now,
-        "exp": now + WEB_TOKEN_TTL_SECONDS,
+        "exp": now + (3600 if trial_id else WEB_TOKEN_TTL_SECONDS),
         "code_id": code_id,
         "code_version": code_version,
+        "trial_id": trial_id,
     }, separators=(",", ":")).encode())
     return f"{payload}.{token_signature(payload, secret)}"
 
@@ -247,7 +251,7 @@ def verify_access_token(token, signing_secret=None):
         if not subject or claims.get("kind") not in {"web", "wechat"}:
             return None
         return ClientIdentity(subject=subject, kind=claims["kind"], label=safe_invite_label(claims.get("label")),
-                              code_id=claims.get("code_id", ""), code_version=claims.get("code_version", 0))
+                              code_id=claims.get("code_id", ""), code_version=claims.get("code_version", 0), trial_id=claims.get("trial_id", ""))
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
 
@@ -269,7 +273,10 @@ def request_identity(request, token=None):
     store = request.app.get(STORE_KEY)
     identity = verify_access_token(request_token(request) if token is None else token,
                                    AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
-    if store and identity and not store.token_valid(identity.code_id, identity.code_version):
+    if identity and identity.trial_id:
+        if not request.app[TRIALS_KEY].get(identity.trial_id, identity.subject):
+            identity = None
+    elif store and identity and not store.token_valid(identity.code_id, identity.code_version):
         identity = None
     if wechat_openid:
         subject = f"wechat-{safe_owner_id(wechat_openid)}"
@@ -773,21 +780,18 @@ async def handle_browser(browser, meeting_limit_enabled=True, language_pair=DEFA
                 all_tasks = {browser_to_cloud, *cloud_tasks, watchdog}
                 if duration_limit:
                     all_tasks.add(duration_limit)
-                done, pending = await asyncio.wait(
-                    all_tasks,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                browser_finished_session = False
-                if browser_to_cloud in done and not browser_to_cloud.cancelled():
-                    browser_finished_session = browser_to_cloud.result() is True
-
-                if browser_finished_session:
-                    await asyncio.wait(cloud_tasks, timeout=5, return_when=asyncio.ALL_COMPLETED)
-
-                for task in all_tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*all_tasks, return_exceptions=True)
+                try:
+                    done, pending = await asyncio.wait(all_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    browser_finished_session = False
+                    if browser_to_cloud in done and not browser_to_cloud.cancelled():
+                        browser_finished_session = browser_to_cloud.result() is True
+                    if browser_finished_session:
+                        await asyncio.wait(cloud_tasks, timeout=5, return_when=asyncio.ALL_COMPLETED)
+                finally:
+                    for task in all_tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*all_tasks, return_exceptions=True)
                 for task in done:
                     if task is browser_to_cloud and browser_finished_session:
                         continue
@@ -857,10 +861,71 @@ async def auth_status_handler(request):
         "max_meeting_seconds": MAX_MEETING_SECONDS,
         "meeting_warning_seconds": MEETING_WARNING_SECONDS,
     }
-    if identity and result["auth_required"]:
+    registry = request.app[TRIALS_KEY]
+    registry.prune()
+    enabled = result["auth_required"] and registry.duration > 0
+    client_id = request.headers.get("X-Chestnut-Client-ID", "")
+    store = request.app.get(STORE_KEY)
+    subject = identity.subject if identity else client_subject(client_id, request.headers.get("x-wx-openid", "").strip(), AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
+    result["trial"] = {"enabled": enabled, "available": enabled and not identity and subject not in registry.by_subject, "duration_seconds": registry.duration}
+    if identity and identity.trial_id:
+        trial = registry.get(identity.trial_id, identity.subject)
+        result["access_mode"] = "trial"
+        result["trial"].update(trial.info(registry.clock()))
+        result["authenticated"] = trial.state(registry.clock()) != "ended"
+    elif identity and result["auth_required"]:
         store = request.app.get(STORE_KEY)
+        result["access_mode"] = "invitation"
         result["invitation_expires_at"] = store.invitation_expiry(identity.code_id) if store else None
     return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+
+async def trial_auth_handler(request):
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
+    registry = request.app[TRIALS_KEY]
+    if not authentication_required(request) or registry.duration <= 0:
+        return web.json_response({"error": "Trial is not available."}, status=403)
+    if not request.app[TRIAL_LIMITER_KEY].allow(request_ip(request)):
+        return web.json_response({"error": "Too many attempts. Please wait and try again."}, status=429)
+    identity = request_identity(request)
+    if identity and not identity.trial_id:
+        return web.json_response({"error": "Your invitation already provides access."}, status=409)
+    try:
+        payload = await request.json()
+        client_id = payload.get("client_id", "")
+        if not isinstance(client_id, str) or not 8 <= len(client_id) <= 200:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        return web.json_response({"error": "Invalid request."}, status=400)
+    store = request.app.get(STORE_KEY)
+    secret = AUTH_SECRET or store.signing_secret if store else AUTH_SECRET
+    openid = request.headers.get("x-wx-openid", "").strip()
+    try:
+        trial = registry.claim(client_subject(client_id, openid, secret))
+    except ValueError as error:
+        return web.json_response({"error": str(error), "trial_used": True}, status=409)
+    except OverflowError as error:
+        return web.json_response({"error": str(error)}, status=503)
+    token = issue_access_token(client_id, "trial", openid, signing_secret=secret, trial_id=trial.id)
+    result = {"authenticated": True, "access_mode": "trial", "trial": {"enabled": True, "available": False, **trial.info(registry.clock())}}
+    if payload.get("client_type") == "miniprogram":
+        result["access_token"] = token
+    response = web.json_response(result, headers={"Cache-Control": "no-store"})
+    if payload.get("client_type") != "miniprogram":
+        response.set_cookie("chestnut_access", token, max_age=3600, httponly=True, secure=request.secure, samesite="Strict", path="/")
+    return response
+
+
+async def finish_trial_handler(request):
+    if not origin_is_allowed(request):
+        raise web.HTTPForbidden(text="Origin not allowed")
+    identity = request_identity(request)
+    if not identity or not identity.trial_id:
+        raise web.HTTPUnauthorized()
+    registry = request.app[TRIALS_KEY]
+    registry.finish(registry.get(identity.trial_id, identity.subject))
+    return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
 async def invite_auth_handler(request):
@@ -901,7 +966,7 @@ async def invite_auth_handler(request):
                                code_id=managed_code["id"] if managed_code else "",
                                code_version=managed_code["version"] if managed_code else 0)
     LOGGER.info("event=invite_accepted ip=%s", ip)
-    result = {"authenticated": True, "expires_in": WEB_TOKEN_TTL_SECONDS,
+    result = {"authenticated": True, "access_mode": "invitation", "expires_in": WEB_TOKEN_TTL_SECONDS,
               "invitation_expires_at": managed_code["expires_at"] if managed_code else None}
     if payload.get("client_type") == "miniprogram":
         result["access_token"] = token
@@ -1015,6 +1080,11 @@ async def websocket_handler(request):
         return socket
 
     meeting_id = safe_owner_id(request.query.get("meeting_id"))
+    trial = request.app[TRIALS_KEY].get(identity.trial_id, identity.subject) if identity.trial_id else None
+    if trial and (trial.state(request.app[TRIALS_KEY].clock()) == "ended" or trial.meeting_id != meeting_id):
+        await browser.send(json.dumps({"type": "trial.ended", "message": "Your trial is complete. Enter an invitation code to continue."}))
+        await socket.close()
+        return socket
     session_key, previous_socket, error = await MEETING_REGISTRY.acquire(identity, meeting_id, browser)
     if error:
         record_activity(request, "meeting_rejected", identity, reason=error, meeting=meeting_id)
@@ -1026,12 +1096,28 @@ async def websocket_handler(request):
     LOGGER.info("event=meeting_admitted owner=%s kind=%s meeting=%s", identity.subject, identity.kind, meeting_id)
     record_activity(request, "meeting_started", identity, meeting=meeting_id)
     store = request.app.get(STORE_KEY)
-    access_guard = asyncio.create_task(guard_managed_access(browser, store, identity)) if store else None
+    access_guard = asyncio.create_task(guard_managed_access(browser, store, identity)) if store and not trial else None
     try:
         # Browser and WeChat cloud meetings both understand the warning and
         # expiry events. Unauthenticated local/LAN development remains
         # unlimited so it preserves the original desktop workflow.
-        await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity), language_pair=language_pair)
+        if trial:
+            registry = request.app[TRIALS_KEY]
+            await browser.send(json.dumps({"type": "trial.status", **trial.info(registry.clock())}))
+            bridge = asyncio.create_task(handle_browser(TrialSocket(browser, registry, trial), meeting_limit_enabled=False, language_pair=language_pair))
+            guard = asyncio.create_task(enforce_trial(browser, registry, trial))
+            try:
+                done, _ = await asyncio.wait({bridge, guard}, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+                if guard not in done and trial.state(registry.clock()) == "ended" and not socket.closed:
+                    await browser.send(json.dumps({"type": "trial.ended", "message": "Your trial is complete. Enter an invitation code to continue."}))
+            finally:
+                bridge.cancel()
+                guard.cancel()
+                await asyncio.gather(bridge, guard, return_exceptions=True)
+        else:
+            await handle_browser(browser, meeting_limit_enabled=meeting_limit_applies_to(identity), language_pair=language_pair)
     finally:
         if access_guard:
             access_guard.cancel()
@@ -1057,7 +1143,17 @@ async def save_meeting_handler(request):
             raise ValueError("Invalid transcript size")
         payload = json.loads(raw)
         filename_label = identity.label if identity.kind == "web" else ""
-        saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
+        if identity.trial_id:
+            trial = request.app[TRIALS_KEY].get(identity.trial_id, identity.subject)
+            if not isinstance(payload, dict) or payload.get("meeting_id") != trial.meeting_id:
+                raise web.HTTPForbidden(text="This transcript does not belong to the trial meeting")
+            async with trial.save_lock:
+                if trial.saved:
+                    return web.json_response(trial.saved, status=201)
+                saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
+                trial.saved = saved
+        else:
+            saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
         record_activity(request, "transcript_saved", identity)
         LOGGER.info(
             "event=transcript_saved storage=%s entries=%d filename=%s",
@@ -1117,11 +1213,15 @@ def validate_configuration():
 
 
 VISIT_LIMITER_KEY = web.AppKey("visit_limiter", SlidingWindowLimiter)
+TRIALS_KEY = web.AppKey("trials", TrialRegistry)
+TRIAL_LIMITER_KEY = web.AppKey("trial_limiter", SlidingWindowLimiter)
 
 
 def create_app(*, admin_path=None):
     validate_configuration()
     app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES, middlewares=[admin_boundary])
+    app[TRIALS_KEY] = TrialRegistry(max(0, min(TRIAL_SECONDS, 900)))
+    app[TRIAL_LIMITER_KEY] = SlidingWindowLimiter(10, 600)
     if admin_path is not None or os.environ.get("CHESTNUT_ADMIN_ENABLED") == "1":
         if WEB_TOKEN_TTL_SECONDS <= 0:
             raise RuntimeError("CHESTNUT_WEB_TOKEN_TTL_SECONDS must be greater than zero")
@@ -1143,6 +1243,8 @@ def create_app(*, admin_path=None):
     app.router.add_get("/api/auth/status", auth_status_handler)
     app.router.add_post("/api/visits", visit_handler)
     app.router.add_post("/api/auth/invite", invite_auth_handler)
+    app.router.add_post("/api/auth/trial", trial_auth_handler)
+    app.router.add_post("/api/auth/trial/finish", finish_trial_handler)
     app.router.add_post("/api/auth/logout", logout_handler)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_post("/api/meetings", save_meeting_handler)

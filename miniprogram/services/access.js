@@ -1,9 +1,11 @@
 const environment = require("../config/environment");
 const key = () => `chestnut_access:${environment.isCloudEnabled() ? environment.CLOUD_ENV_ID : environment.getServerHost()}`;
+let latestStatus = null;
+function trialInfo() { return latestStatus?.access_mode === "trial" ? latestStatus.trial : null; }
 function token() { return wx.getStorageSync(key()) || ""; }
-function clear() { wx.removeStorageSync(key()); }
+function clear() { wx.removeStorageSync(key()); latestStatus = null; }
 function request(path, method = "GET", data) {
-  const header = { "content-type": "application/json", "X-WX-SERVICE": environment.CLOUD_SERVICE };
+  const header = { "content-type": "application/json", "X-WX-SERVICE": environment.CLOUD_SERVICE, "X-Chestnut-Client-ID": clientId() };
   if (token()) header.Authorization = `Bearer ${token()}`;
   const call = environment.isCloudEnabled()
     ? wx.cloud.callContainer({ config: environment.cloudConfig(), path, method, header, data })
@@ -17,9 +19,10 @@ function request(path, method = "GET", data) {
   });
 }
 async function authorized() {
-  const status = await request("/api/auth/status");
-  return !status.auth_required || status.authenticated;
+  const result = await status();
+  return !result.auth_required || result.authenticated;
 }
+async function status() { latestStatus = await request("/api/auth/status"); return latestStatus; }
 function clientId() {
   let client = wx.getStorageSync("chestnut_client_id");
   if (!client) { client = `${Date.now()}-${Math.random().toString(36).slice(2)}`; wx.setStorageSync("chestnut_client_id", client); }
@@ -34,5 +37,13 @@ async function login(code) {
   const result = await request("/api/auth/invite", "POST", { code, client_id: client, client_type: "miniprogram" });
   if (result.access_token) wx.setStorageSync(key(), result.access_token);
   else if (result.auth_required !== false) throw new Error("验证未完成，请重试");
+  latestStatus = result;
 }
-module.exports = { token, clear, request, authorized, login, recordVisit };
+async function startTrial() {
+  const result = await request("/api/auth/trial", "POST", { client_id: clientId(), client_type: "miniprogram" });
+  if (!result.access_token) throw new Error("Unable to start the trial.");
+  wx.setStorageSync(key(), result.access_token);
+  latestStatus = result;
+  return result;
+}
+module.exports = { token, clear, request, authorized, login, recordVisit, status, startTrial, trialInfo };

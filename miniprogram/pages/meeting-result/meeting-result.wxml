@@ -7,7 +7,7 @@
   <view class="card result-card">
     <view class="result-mark {{saved ? '' : 'warning'}}">{{saved ? '✓' : '!'}}</view>
     <text class="eyebrow">{{saved ? 'Meeting Saved' : 'Transcript Not Saved'}}</text>
-    <view class="title result-title">Meeting Complete</view>
+    <view class="title result-title">{{trial ? 'Trial Complete' : 'Meeting Complete'}}</view>
     <view class="subtitle">{{message}}</view>
 
     <view class="summary">
@@ -16,6 +16,6 @@
       <view><text>Transcript</text><text class="summary-value filename">{{filename}}</text></view>
     </view>
 
-    <button class="primary-button" bindtap="newMeeting">返回服务页</button>
+    <button class="primary-button" bindtap="newMeeting">{{trial ? '输入邀请码继续' : '返回服务页'}}</button>
   </view>
 </view>

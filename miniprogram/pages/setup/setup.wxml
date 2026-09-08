@@ -59,4 +59,4 @@
   </view>
 </view>
 
-<invite-dialog visible="{{inviteVisible}}" bindverified="verified" bindcancel="cancelInvite" />
+<invite-dialog visible="{{inviteVisible}}" allow-trial="{{!pendingSave}}" bindverified="verified" bindcancel="cancelInvite" />

@@ -39,3 +39,9 @@
 .verify[disabled] { background: #9fbfe0; color: #fff; }
 .cancel { background: transparent; color: #6e6e73; margin-top: 8px; }
 .verify::after, .cancel::after { border: 0; }
+.trial-entry { margin-top: 20px; text-align: center; }
+.trial-divider { color: #6e6e73; font-size: 12px; margin-bottom: 12px; }
+.trial { min-height: 48px; padding: 12px; border: 1px solid #cfe4fb; border-radius: 12px; background: #eef6ff; color: #0064c9; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.trial::after { border: 0; }
+.trial[disabled] { background: #f5f5f7; color: #6e6e73; border-color: #e5e5e7; }
+.trial-note { margin-top: 10px; color: #6e6e73; font-size: 12px; line-height: 1.6; }

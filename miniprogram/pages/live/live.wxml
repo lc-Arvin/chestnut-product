@@ -21,6 +21,7 @@
     </view>
 
     <view class="connection {{connectionState}}">
+      <text wx:if="{{trialTime}}" class="trial-badge {{trialEnding ? 'trial-ending' : ''}}">Trial · {{trialTime}}</text>
       <view class="connection-dot"></view>
       <text>{{connectionMessage}}</text>
       <button wx:if="{{connectionState === 'error' || connectionState === 'disconnected'}}" bindtap="reconnect">Reconnect</button>

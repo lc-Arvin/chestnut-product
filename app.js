@@ -54,6 +54,11 @@ const inviteVisibilityButton = document.querySelector("#invite-visibility-button
 const startButton = document.querySelector("#start-button");
 const invitationValidity = document.querySelector("#invitation-validity");
 const invitationValidityText = document.querySelector("#invitation-validity-text");
+const trialEntry = document.querySelector("#trial-entry");
+const trialButton = document.querySelector("#trial-button");
+const trialEntryNote = document.querySelector("#trial-entry-note");
+const trialSetupNote = document.querySelector("#trial-setup-note");
+const trialBadge = document.querySelector("#trial-badge");
 const continueButton = document.querySelector("#continue-button");
 const pauseButton = document.querySelector("#pause-button");
 const pauseLabel = document.querySelector("#pause-label");
@@ -142,6 +147,7 @@ function lockConsole(message = "") {
   accessGate.hidden = false;
   accessError.textContent = message;
   accessError.hidden = !message;
+  renderTrialEntry();
   window.setTimeout(() => inviteCode.focus(), 0);
 }
 
@@ -151,8 +157,71 @@ let pendingTranscript = null;
 let forceInvite = false;
 let savingTranscript = false;
 let invitationStatusVersion = 0;
+let trialAccess = null;
+let trialEligibility = null;
+let trialLocalDeadline = null;
+let trialComplete = false;
+
+function renderTrialEntry() {
+  trialEntry.hidden = !trialEligibility?.enabled || accessAction === "save";
+  const resumable = trialAccess && trialAccess.state !== "ended" && !trialComplete;
+  trialButton.disabled = !trialEligibility?.available && !resumable;
+  const minutes = Math.ceil((trialEligibility?.duration_seconds || 180) / 60);
+  trialButton.textContent = resumable ? "Continue your trial →" : trialButton.disabled ? "Trial already used" : `Try free for ${minutes} minutes →`;
+  document.querySelector("#trial-divider-label").textContent = trialButton.disabled ? "Trial access" : resumable ? "Your trial" : "New here?";
+  trialEntryNote.textContent = trialButton.disabled ? "Enter an invitation code above to keep translating." : "No code needed. Starts when translation connects. Pauses count toward trial time.";
+  document.querySelector("#access-title").textContent = trialComplete ? "Your trial is complete" : "Welcome to ChestnutOne";
+  document.querySelector(".access-card .intro").textContent = trialComplete ? "Ready for your next conversation? Enter an invitation code to continue." : "Enter your invitation code to continue with your meeting.";
+}
+
+function updateTrialAccess(status) {
+  trialEligibility = status.trial || null;
+  trialAccess = status.access_mode === "trial" ? status.trial : null;
+  if (status.access_mode === "invitation") trialComplete = false;
+  if (trialAccess?.state === "ended") trialComplete = true;
+  trialSetupNote.hidden = !trialAccess;
+  if (trialAccess) trialSetupNote.textContent = trialComplete ? "Trial complete · Enter an invitation code to continue" : "Free trial · Starts when connected. Pauses do not extend trial time.";
+  renderTrialEntry();
+}
+
+async function startTrial() {
+  if (trialButton.disabled || accessButton.disabled) return;
+  const attempt = ++accessAttempt;
+  trialButton.disabled = true;
+  accessButton.disabled = true;
+  accessError.hidden = true;
+  try {
+    const response = await fetch("/api/auth/trial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: createClientId() }) });
+    const result = await response.json();
+    if (attempt !== accessAttempt) return;
+    if (!response.ok || !result.authenticated) {
+      if (result.trial_used) { trialEligibility.available = false; trialAccess = null; }
+      throw new Error(result.error || "Unable to start the trial. Please try again.");
+    }
+    invitationStatusVersion += 1;
+    trialComplete = false;
+    updateTrialAccess(result);
+    forceInvite = false;
+    accessAction = "start";
+    await continueAfterAccess();
+  } catch (error) {
+    if (attempt === accessAttempt) lockConsole(error.message || "Unable to start the trial. Please try again.");
+  } finally {
+    if (attempt === accessAttempt) { accessButton.disabled = false; renderTrialEntry(); }
+  }
+}
+
+function updateTrialCountdown() {
+  if (!trialAccess || stoppingMeeting) return;
+  const remaining = trialLocalDeadline === null ? trialAccess.duration_seconds : Math.max(0, Math.ceil((trialLocalDeadline - Date.now()) / 1000));
+  trialBadge.hidden = false;
+  trialBadge.textContent = `Trial · ${formatTime(remaining).slice(3)}`;
+  trialBadge.classList.toggle("is-ending", remaining <= 30);
+  if (remaining <= 0) stopMeeting();
+}
 
 function updateInvitationValidity(status) {
+  updateTrialAccess(status);
   const expiry = status.invitation_expires_at;
   invitationValidity.hidden = !status.authenticated || expiry === undefined;
   if (invitationValidity.hidden) return;
@@ -169,7 +238,7 @@ function updateInvitationValidity(status) {
 async function refreshInvitationStatus() {
   const version = ++invitationStatusVersion;
   try {
-    const response = await fetch("/api/auth/status");
+    const response = await fetch("/api/auth/status", { headers: { "X-Chestnut-Client-ID": createClientId() } });
     if (!response.ok) return;
     const status = await response.json();
     if (version === invitationStatusVersion) updateInvitationValidity(status);
@@ -182,12 +251,13 @@ async function initializeAccess(action = "start") {
   accessAction = action;
   startButton.disabled = true;
   try {
-    const response = await fetch("/api/auth/status");
+    const response = await fetch("/api/auth/status", { headers: { "X-Chestnut-Client-ID": createClientId() } });
     if (!response.ok) throw new Error("Could not verify access. Please retry.");
     const status = await response.json();
     invitationStatusVersion += 1;
     updateInvitationValidity(status);
-    if ((!status.auth_required || status.authenticated) && !forceInvite) await continueAfterAccess();
+    const canSaveTrial = action === "save" && status.access_mode === "trial" && pendingTranscript?.meeting_id === status.trial?.meeting_id;
+    if (((!status.auth_required || status.authenticated) && !forceInvite) || canSaveTrial) await continueAfterAccess();
     else lockConsole();
   } catch (error) { lockConsole(error.message || "Could not reach the service. Please retry."); }
   finally { startButton.disabled = false; }
@@ -204,6 +274,7 @@ function cancelAccess() {
   accessAction = null;
   inviteCode.value = "";
   accessButton.disabled = false;
+  renderTrialEntry();
   unlockConsole();
   startButton.focus();
 }
@@ -213,6 +284,7 @@ async function submitInvitation(event) {
   if (accessButton.disabled) return;
   const attempt = ++accessAttempt;
   accessButton.disabled = true;
+  trialButton.disabled = true;
   accessError.hidden = true;
   try {
     const response = await fetch("/api/auth/invite", {
@@ -232,7 +304,7 @@ async function submitInvitation(event) {
   } catch (error) {
     if (attempt === accessAttempt) lockConsole(error.message || "Invitation code not accepted.");
   } finally {
-    if (attempt === accessAttempt) accessButton.disabled = false;
+    if (attempt === accessAttempt) { accessButton.disabled = false; renderTrialEntry(); }
   }
 }
 
@@ -420,6 +492,16 @@ function appendCaption(text, language, role) {
 }
 
 function handleRealtimeEvent(event) {
+  if (event.type === "trial.status") {
+    trialAccess = { ...trialAccess, ...event };
+    trialLocalDeadline = event.state === "active" ? Date.now() + event.remaining_seconds * 1000 : null;
+    updateTrialCountdown();
+    return;
+  }
+  if (event.type === "trial.ended") {
+    stopMeeting();
+    return;
+  }
   if (event.type === "access.denied") {
     forceInvite = true;
     stopMeeting({ requireReauth: true });
@@ -653,7 +735,9 @@ async function beginMeeting() {
   droppedAudioFrames = 0;
   realtimeRetryBlocked = false;
   stoppingMeeting = false;
-  meetingId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  meetingId = trialAccess?.meeting_id || window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  trialLocalDeadline = trialAccess?.state === "active" ? Date.now() + trialAccess.remaining_seconds * 1000 : null;
+  trialBadge.hidden = !trialAccess;
   meetingSeconds = 0;
   isPaused = false;
   updatePauseState();
@@ -674,8 +758,10 @@ async function beginMeeting() {
   chinesePlaceholder.hidden = false;
   setConnectionState("connecting", "Connecting to Bailian live translation…");
   showScreen("live");
+  updateTrialCountdown();
 
   meetingInterval = window.setInterval(() => {
+    updateTrialCountdown();
     if (meetingWarningRemaining > 0) {
       meetingWarningRemaining -= 1;
       updateMeetingWarning();
@@ -736,6 +822,7 @@ async function saveMeetingTranscript() {
 
 async function stopMeeting({ requireReauth = false } = {}) {
   if (stoppingMeeting) return;
+  const wasTrial = Boolean(trialAccess);
   stoppingMeeting = true;
   clearInterval(meetingInterval);
   clearTimeout(reconnectTimer);
@@ -771,6 +858,9 @@ async function stopMeeting({ requireReauth = false } = {}) {
     socket?.close();
   }
   pendingTranscript = { meeting_id: meetingId, started_at: meetingStartedAt?.toISOString(), ended_at: new Date().toISOString(), duration_seconds: meetingSeconds, entries: [...meetingRecords] };
+  if (wasTrial) {
+    try { await fetch("/api/auth/trial/finish", { method: "POST" }); } catch { /* The server deadline still applies while offline. */ }
+  }
   await saveMeetingTranscript();
   if (requireReauth) {
     try {
@@ -778,6 +868,16 @@ async function stopMeeting({ requireReauth = false } = {}) {
     } catch { /* The access gate still prevents another local start attempt. */ }
   }
   stoppingMeeting = false;
+  if (wasTrial) {
+    trialComplete = true;
+    if (trialAccess) trialAccess.state = "ended";
+    if (trialEligibility) trialEligibility.available = false;
+    trialBadge.hidden = true;
+    trialSetupNote.hidden = false;
+    trialSetupNote.textContent = "Trial complete · Enter an invitation code to continue";
+    accessAction = pendingTranscript ? "save" : "start";
+    lockConsole();
+  }
 }
 
 startButton.addEventListener("click", () => initializeAccess());
@@ -786,7 +886,7 @@ document.querySelector("#retry-save-button").addEventListener("click", () => ini
 accessGate.addEventListener("keydown", event => {
   if (event.key === "Escape") cancelAccess();
   if (event.key === "Tab") {
-    const items = [...accessGate.querySelectorAll("input, button")].filter(item => !item.disabled);
+    const items = [...accessGate.querySelectorAll("input, button")].filter(item => !item.disabled && item.getClientRects().length);
     const first = items[0], last = items[items.length - 1];
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
@@ -798,4 +898,5 @@ continueButton.addEventListener("click", beginMeeting);
 pauseButton.addEventListener("click", togglePause);
 stopButton.addEventListener("click", () => stopMeeting());
 retryButton.addEventListener("click", connectBailian);
+trialButton.addEventListener("click", startTrial);
 refreshInvitationStatus();

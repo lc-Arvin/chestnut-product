@@ -10,6 +10,7 @@ const { safeTopPadding } = require("../../utils/layout");
 Page({
   data: {
     timer: "00:00:00",
+    trialTime: "",
     isPaused: false,
     ending: false,
     connectionState: "connecting",
@@ -32,6 +33,8 @@ Page({
   },
 
   onLoad() {
+    this.trial = access.trialInfo?.();
+    this.trialDeadline = this.trial?.state === "active" ? Date.now() + this.trial.remaining_seconds * 1000 : null;
     this.languagePair = [...meetingState.state.languagePair];
     this.setData({
       firstLanguage: languages.labels[this.languagePair[0]],
@@ -82,6 +85,7 @@ Page({
 
   startTimer() {
     this.timerInterval = setInterval(() => {
+      this.updateTrialCountdown();
       if (this.meetingWarningRemaining > 0 && !this.data.ending) {
         this.meetingWarningRemaining -= 1;
         this.setData({
@@ -132,6 +136,13 @@ Page({
   },
 
   handleRealtimeEvent(event) {
+    if (event.type === "trial.status") {
+      this.trial = event;
+      this.trialDeadline = event.state === "active" ? Date.now() + event.remaining_seconds * 1000 : null;
+      this.updateTrialCountdown();
+      return;
+    }
+    if (event.type === "trial.ended") { this.stopMeeting("trial"); return; }
     if (event.type === "access.denied") {
       access.clear();
       this.socket.close();
@@ -297,6 +308,13 @@ Page({
     this.socket.connect();
   },
 
+  updateTrialCountdown() {
+    if (!this.trial || this.data.ending) return;
+    const remaining = this.trialDeadline === null ? this.trial.duration_seconds : Math.max(0, Math.ceil((this.trialDeadline - Date.now()) / 1000));
+    this.setData({ trialTime: formatTime(remaining).slice(3), trialEnding: remaining <= 30 });
+    if (remaining <= 0) this.stopMeeting("trial");
+  },
+
   stopMeeting(trigger) {
     if (this.data.ending) return;
     const limitReached = trigger === "limit";
@@ -329,6 +347,7 @@ Page({
     this.socket.close();
     this.capturePendingCaptions();
     const payload = {
+      meeting_id: this.socket.meetingId,
       started_at: meetingState.state.startedAt,
       ended_at: new Date().toISOString(),
       duration_seconds: meetingState.state.elapsedSeconds,
@@ -337,6 +356,9 @@ Page({
 
     meetingState.state.pendingPayload = payload;
     let result;
+    if (this.trial) {
+      try { await access.request("/api/auth/trial/finish", "POST"); } catch { /* Server deadline still applies. */ }
+    }
     try {
       const saved = await saveMeeting(payload);
       meetingState.state.pendingPayload = null;
@@ -355,6 +377,7 @@ Page({
       };
     }
     if (this.requireReauth) access.clear();
+    if (this.trial) { result.trial = true; meetingState.state.trialComplete = true; }
     meetingState.state.lastResult = result;
     wx.redirectTo({ url: "/pages/meeting-result/meeting-result" });
   },

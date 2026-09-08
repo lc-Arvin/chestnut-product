@@ -11,6 +11,8 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 
 ## 本地管理后台
 
+启用邀请码保护后，新用户也可在邀请码弹窗选择 3 分钟免费试用。连接翻译成功才开始计时，暂停和重连不增加额度；结束后保存会议稿并引导输入邀请码。用户旅途、短期防重复边界和验证方式见 [`docs/TRIAL_EXPERIENCE.md`](docs/TRIAL_EXPERIENCE.md)。
+
 在项目虚拟环境中执行 `python scripts/start_admin_local.py`，打开 `http://127.0.0.1:8080/admin`。Windows 可直接运行 `.\.venv\Scripts\python.exe scripts/start_admin_local.py`。首次打开时设置至少 12 个字符的独立管理员密码。
 
 后台支持批量生成 6 位数字邀请码、明文查看和复制、标签/备注搜索、快捷有效期、生成/失效时间排序、临近过期高亮、成功验证次数上限和停用/恢复，以及每日访问、按码使用情况和异常提示。活动记录自动合并重复接入，访问按日汇总，历史默认保留 90 天。数据持久保存在 `data/admin.sqlite3`，已排除 Git 和 Docker 打包。具体操作、统计口径、验证方式和本地边界见 [`docs/LOCAL_ADMIN.md`](docs/LOCAL_ADMIN.md)。
