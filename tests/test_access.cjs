@@ -169,6 +169,18 @@ function miniSetup(access, save=async()=>{}) {
   vm.runInContext(source('miniprogram/pages/setup/setup.js'),c);page.setData=data=>Object.assign(page.data,data);
   return {page,visits,mic:()=>mic};
 }
+
+test('Mini setup displays invitation expiry in Beijing time and hides it for trials',()=>{
+  const {page}=miniSetup({});
+  page.updateInvitationHint({authenticated:true,access_mode:'invitation',invitation_expires_at:Date.parse('2030-01-02T03:04:00Z')/1000});
+  assert.equal(page.data.invitationHint,'邀请码有效期至 2030-01-02 11:04（北京时间）');
+  page.updateInvitationHint({authenticated:true,access_mode:'invitation',invitation_expires_at:null});
+  assert.equal(page.data.invitationHint,'邀请码长期有效');
+  page.updateInvitationHint({authenticated:true,access_mode:'trial'});
+  assert.equal(page.data.invitationHint,'');
+  page.updateInvitationHint({authenticated:false});
+  assert.equal(page.data.invitationHint,'');
+});
 test('Mini homepage is public; start shows invite; cancel keeps language choice',async()=>{
   let checks=0;const {page,visits,mic}=miniSetup({authorized:async()=>{checks++;return false;}});
   page.onShow();assert.equal(checks,0);

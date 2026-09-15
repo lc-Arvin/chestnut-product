@@ -1348,12 +1348,17 @@ def create_app(*, admin_path=None):
 
 def main():
     load_bailian_credentials()
+    app = create_app()
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
-    LOGGER.info("event=service_started url=http://%s:%d", display_host, PORT)
-    if HOST == "0.0.0.0":
-        LOGGER.info("event=network_access_enabled")
-    LOGGER.info("event=realtime_endpoint_ready path=/ws")
-    web.run_app(create_app(), host=HOST, port=PORT, print=None)
+
+    def report_started(_message):
+        # aiohttp calls this after startup hooks and the listening socket succeed.
+        LOGGER.info("event=service_started url=http://%s:%d", display_host, PORT)
+        if HOST == "0.0.0.0":
+            LOGGER.info("event=network_access_enabled")
+        LOGGER.info("event=realtime_endpoint_ready path=/ws")
+
+    web.run_app(app, host=HOST, port=PORT, print=report_started)
 
 
 if __name__ == "__main__":

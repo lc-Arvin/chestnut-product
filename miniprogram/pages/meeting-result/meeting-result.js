@@ -20,7 +20,7 @@ Page({
       entryCount: result.entryCount || 0,
       filename: result.filename || "Not saved",
       message: result.saved
-        ? "完整的原文和译文已经保存。"
+        ? (result.storage === "mysql" || result.storage === "cos" ? "完整的原文和译文已保存到云端。" : result.storage === "local" ? "完整的原文和译文已保存到本地服务。" : "完整的原文和译文已经保存。")
         : `会议稿暂未保存，返回服务页可重试：${result.error || "服务暂不可用"}`,
     });
   },

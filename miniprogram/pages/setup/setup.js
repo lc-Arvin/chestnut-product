@@ -19,6 +19,7 @@ Page({
     inviteVisible: false,
     busy: false,
     pendingSave: false,
+    invitationHint: "",
     languageRanges: [languages.codes.map(code => languages.labels[code]), languages.codes.map(code => languages.labels[code])],
     languageIndices: [0, 1],
     languagePairLabel: "中文（简体） ⇄ English",
@@ -34,6 +35,7 @@ Page({
 
   onShow() {
     access.recordVisit();
+    this.refreshAccess();
     recorder.stop();
     this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;
@@ -43,6 +45,29 @@ Page({
       this.action = this.data.pendingSave ? "save" : "start";
       this.setData({ inviteVisible: true });
     }
+  },
+
+  onHide() { this.accessRefresh = (this.accessRefresh || 0) + 1; },
+  onUnload() { this.onHide(); },
+  async refreshAccess() {
+    const attempt = this.accessRefresh = (this.accessRefresh || 0) + 1;
+    this.setData({ invitationHint: "" });
+    try {
+      const result = await access.status?.();
+      if (attempt === this.accessRefresh) this.updateInvitationHint(result);
+    } catch { /* Starting a meeting performs its own access check. */ }
+  },
+  updateInvitationHint(result) {
+    let invitationHint = "";
+    if (result?.authenticated && result.access_mode === "invitation") {
+      if (result.invitation_expires_at === null) invitationHint = "邀请码长期有效";
+      else if (Number.isFinite(result.invitation_expires_at)) {
+        const date = new Date((result.invitation_expires_at + 8 * 3600) * 1000);
+        const pad = value => String(value).padStart(2, "0");
+        invitationHint = `邀请码有效期至 ${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}（北京时间）`;
+      }
+    }
+    this.setData({ invitationHint });
   },
 
   handleLanguageChange(event) {
@@ -65,11 +90,13 @@ Page({
     if (this.data.cloudEnabled) return environment.getServerHost();
     const serverHost = environment.setServerHost(this.data.serverHost);
     this.setData({ serverHost });
+    this.refreshAccess();
     return serverHost;
   },
 
   cancelInvite() { this.action = null; this.setData({ inviteVisible: false }); },
   async verified() {
+    this.updateInvitationHint(access.currentStatus?.());
     this.setData({ inviteVisible: false });
     const action = this.action;
     this.action = null;
@@ -84,7 +111,7 @@ Page({
       const canSaveTrial = action === "save" && access.trialInfo?.()?.meeting_id === meetingState.state.pendingPayload?.meeting_id && Boolean(meetingState.state.pendingPayload?.meeting_id);
       if (authorized || canSaveTrial) await this.verified();
       else this.setData({ inviteVisible: true });
-    } catch (error) { wx.showToast({ title: "无法连接服务，请重试", icon: "none" }); }
+    } catch (error) { wx.showToast({ title: error.message || "无法连接服务，请重试", icon: "none" }); }
     finally { this.setData({ busy: false }); }
   },
   retrySave() { if (!this.data.busy) this.runAuthorized("save"); },

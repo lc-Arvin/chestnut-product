@@ -49,7 +49,14 @@ class MeetingSocket {
 
     this.meetingId = this.meetingId || meetingState.state.startedAt || "mini-meeting";
     const query = `?auth=message&meeting_id=${encodeURIComponent(this.meetingId)}&languages=${encodeURIComponent(this.languagePair.join(","))}`;
-    const connection = environment.isCloudEnabled()
+    if (environment.isCloudEnabled() && typeof wx.cloud?.connectContainer !== "function") {
+      this.intentionalClose = true;
+      this.emit("event", { type: "error", retryable: false, error: { message: "当前微信不支持云端实时翻译，请升级微信后重试" } });
+      return;
+    }
+    let connection;
+    try {
+      connection = environment.isCloudEnabled()
       ? wx.cloud.connectContainer({
           service: environment.CLOUD_SERVICE,
           path: `/ws${query}`,
@@ -61,6 +68,11 @@ class MeetingSocket {
             timeout: 20000,
           }),
         });
+    } catch (error) {
+      this.intentionalClose = true;
+      this.emit("event", { type: "error", retryable: false, error: { message: "无法启动实时连接，请检查微信版本和服务配置" } });
+      return;
+    }
 
     connection.then(({ socketTask: task }) => {
       if (generation !== this.generation) {

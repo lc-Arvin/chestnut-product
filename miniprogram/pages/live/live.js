@@ -365,6 +365,7 @@ Page({
       result = {
         saved: true,
         filename: saved.filename,
+        storage: saved.storage,
         duration: formatTime(meetingState.state.elapsedSeconds),
         entryCount: meetingState.state.entries.length,
       };

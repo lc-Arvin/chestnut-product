@@ -32,7 +32,7 @@
           <text class="setting-title">云端翻译服务</text>
           <text class="setting-hint">{{serverHint}}</text>
         </view>
-        <view class="ready"><view class="status-dot"></view>Ready</view>
+        <view class="ready">已配置</view>
       </view>
 
       <view wx:else class="setting-row server-row">
@@ -52,6 +52,7 @@
       </view>
     </view>
 
+    <view wx:if="{{invitationHint}}" class="invitation-hint">{{invitationHint}}</view>
     <button class="primary-button" bindtap="startMeeting" loading="{{busy}}" disabled="{{busy}}">
       Start Meeting <text>→</text>
     </button>

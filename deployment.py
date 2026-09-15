@@ -31,7 +31,9 @@ class Deployment:
                        or parsed.path or parsed.query or parsed.fragment):
             raise RuntimeError("CHESTNUT_PUBLIC_ORIGIN must be an HTTPS origin without a path")
         if cloud and not origin:
-            raise RuntimeError("Cloud requires CHESTNUT_PUBLIC_ORIGIN")
+            raise RuntimeError("Cloud requires CHESTNUT_PUBLIC_ORIGIN. Set the actual Web HTTPS origin "
+                               "in the cloud service runtime environment, without /admin or another path. "
+                               "Local .env files are not included in the container image.")
         if cloud and len(os.environ.get("CHESTNUT_AUTH_SECRET", "").strip()) < 32:
             raise RuntimeError("Cloud requires CHESTNUT_AUTH_SECRET with at least 32 characters")
         admin = os.environ.get("CHESTNUT_ADMIN_ENABLED", "1" if cloud else "0")

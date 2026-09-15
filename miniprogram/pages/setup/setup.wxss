@@ -98,6 +98,7 @@
 }
 
 .setup-brand { justify-content: center; margin-bottom: 26rpx; }
+.invitation-hint { margin: 0 0 24rpx; padding: 16rpx 20rpx; border-radius: 12rpx; background: var(--blue-soft); color: var(--blue); font-size: 22rpx; line-height: 1.7; text-align: center; overflow-wrap: anywhere; }
 .setup-card .title { font-size: 52rpx; letter-spacing: -2rpx; text-align: center; }
 .setup-card .subtitle { font-size: 24rpx; text-align: center; }
 .setup-card .primary-button { width: 100%; box-sizing: border-box; }

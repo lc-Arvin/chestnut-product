@@ -117,6 +117,14 @@ $env:CHESTNUT_ENV_FILE='.env.mysql'
 
 ## 4. 微信云托管发布步骤
 
+本项目当前可先尝试使用以下云托管 HTTPS 地址作为 Web 入口；将此键和值分别填写到**云托管待部署版本的运行时环境变量**中（不是只修改电脑上的 `.env`）：
+
+```dotenv
+CHESTNUT_PUBLIC_ORIGIN=https://chestnut-api-305195-11-1477663536.sh.run.tcloudbase.com
+```
+
+值不带 `/admin`、`/health` 或路径。对应后台入口是在该地址后加 `/admin`。配置此值不会自动启用云服务的公网访问，仍需确认平台已开放该入口。计划使用的 `www.myone.bj.cn` 应先在云托管配置域名绑定和 HTTPS 证书，确认 `https://www.myone.bj.cn` 可访问服务，再把此变量改为该 HTTPS 源。仅 HTTP 的公网地址不适合浏览器录音和 Secure Cookie 登录。
+
 1. 按第 2 节建立业务库和应用账号。配置服务与数据库的内网连通。
 2. 绑定 Web 使用的 HTTPS 域名，确定 `CHESTNUT_PUBLIC_ORIGIN`。浏览器麦克风与 Secure Cookie 都要求正式站点使用 HTTPS。HTTP 入口由网关重定向至 HTTPS。
 3. 参考 `.env.cloud.example`，在云托管控制台/密钥管理配置中逐项注入环境变量；值不带 `.env` 语法的包围引号。必填项是百炼两项、MySQL 连接信息、实际 HTTPS Origin、随机签名密钥和首次管理员密码。模板域名和空密码不能直接发布。
@@ -230,6 +238,7 @@ Remove-Item Env:CHESTNUT_MYSQL_PORT
 
 | 现象 | 检查 |
 | --- | --- |
+| `Cloud requires CHESTNUT_PUBLIC_ORIGIN` / 容器不断重启 | 镜像构建已成功，但缺少运行时变量。在云托管待部署版本的环境变量中添加 `CHESTNUT_PUBLIC_ORIGIN`，值为浏览器实际使用的完整 HTTPS 源（如 `https://meet.example.com`，替换为真实域名），不带 `/admin` 或其他路径，不填本地监听地址。仅编辑本机 `.env` 不会更新云端变量，`.env` 不在镜像中。还需核对云端模板中的签名密钥、数据库连接和首次管理员密码 |
 | MySQL 2003 / 超时 | 本机是否误用 10.* 内网地址；公网端口是否为 27839；云端 VPC 和安全组是否连通 |
 | MySQL 1045 | 用户名/密码、新旧变量优先级、账号允许的来源 |
 | MySQL 1049 / 初始化失败 | 是否已创建所选业务库，应用账号是否有该库权限 |

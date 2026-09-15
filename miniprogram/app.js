@@ -7,7 +7,7 @@ App({
   },
 
   onLaunch() {
-    if (environment.isCloudEnabled()) wx.cloud.init({ env: environment.CLOUD_ENV_ID });
+    if (environment.isCloudEnabled() && typeof wx.cloud?.init === "function") wx.cloud.init({ env: environment.CLOUD_ENV_ID });
     meetingState.reset();
   },
 });

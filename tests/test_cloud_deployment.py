@@ -12,6 +12,22 @@ from deployment import Deployment, DEPLOYMENT_KEY, client_ip, wechat_openid
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_invalid_configuration_does_not_announce_successful_startup(self):
+        with patch.object(server, "load_bailian_credentials"), patch.object(server, "create_app", side_effect=RuntimeError("missing configuration")), \
+                patch.object(server, "LOGGER") as logger, patch.object(server.web, "run_app") as run:
+            with self.assertRaisesRegex(RuntimeError, "missing configuration"):
+                server.main()
+            logger.info.assert_not_called()
+            run.assert_not_called()
+
+    def test_startup_message_waits_for_aiohttp_listening_callback(self):
+        with patch.object(server, "load_bailian_credentials"), patch.object(server, "create_app", return_value=object()), \
+                patch.object(server, "LOGGER") as logger, patch.object(server.web, "run_app") as run:
+            server.main()
+            logger.info.assert_not_called()
+            run.call_args.kwargs["print"]("listening")
+            self.assertIn("event=service_started", logger.info.call_args_list[0].args[0])
+
     def test_cos_download_reads_complete_document_and_closes_stream(self):
         from unittest.mock import Mock
         stream = Mock()
