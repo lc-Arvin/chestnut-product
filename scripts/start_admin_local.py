@@ -5,14 +5,15 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from version_info import announce_startup_version
+from version_info import announce_startup_version, startup_stage
 
 if __name__ == "__main__":
     announce_startup_version()
 
 from local_config import load_local_configuration
 
-load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE", ROOT / ".env"))
+with startup_stage("environment_file"):
+    load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE", ROOT / ".env"))
 os.environ["CHESTNUT_ENV"] = "local"
 os.environ["CHESTNUT_DATABASE_BACKEND"] = "sqlite"
 os.environ["CHESTNUT_TRANSCRIPT_STORAGE"] = "local"

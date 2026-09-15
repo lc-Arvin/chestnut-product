@@ -1,12 +1,17 @@
 """Read embedded release metadata and announce it before application setup."""
 from datetime import datetime, timezone
+from contextlib import contextmanager
+from functools import lru_cache
 import json
 from pathlib import Path
+import secrets
 import subprocess
+import time
 
 
 ROOT = Path(__file__).resolve().parent
 _announced = False
+BOOT_ID = secrets.token_hex(8)
 
 
 def utc_now():
@@ -51,9 +56,34 @@ def announce_startup_version():
         return
     # Stdlib only, flushed stdout: even an invalid .env, port or dependency
     # import must not hide which release is attempting to start.
-    print(json.dumps({"time_utc": utc_now(), "level": "INFO", "event": "service_starting",
-                      **read_version()}, ensure_ascii=True, sort_keys=True), flush=True)
+    emit_event("service_starting", **runtime_version())
     _announced = True
+
+
+@lru_cache(maxsize=1)
+def runtime_version():
+    return read_version()
+
+
+def emit_event(event, *, level="INFO", **fields):
+    print(json.dumps({"time_utc": utc_now(), "level": level, "event": event,
+                      "version": runtime_version()["version"], "boot_id": BOOT_ID,
+                      **fields}, ensure_ascii=True, sort_keys=True), flush=True)
+
+
+@contextmanager
+def startup_stage(stage):
+    started = time.monotonic()
+    emit_event("startup_stage_started", stage=stage)
+    try:
+        yield
+    except Exception as error:
+        emit_event("startup_stage_failed", level="ERROR", stage=stage,
+                   error_type=type(error).__name__, elapsed_ms=round((time.monotonic() - started) * 1000))
+        raise
+    else:
+        emit_event("startup_stage_completed", stage=stage,
+                   elapsed_ms=round((time.monotonic() - started) * 1000))
 
 
 def write_build_info(root=ROOT):

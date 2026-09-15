@@ -145,6 +145,18 @@ git push --follow-tags origin main
 
 从日志复制 `code_ref`，运行 `git show --no-patch <code_ref>` 即可找到完整提交 SHA 和说明。云端使用随镜像保存的标签和指纹，无需添加版本环境变量，也不上传 `.git`。可运行 `python version_info.py` 查看当前版本元数据。
 
+所有应用日志均带 `version` 和每次进程启动随机生成的 `boot_id`，时间统一为 UTC，日志统一写标准输出。`startup_stage_started/completed/failed` 区分配置文件、配置校验、MySQL/SQLite、管理员初始化；失败包含阶段、异常类型和耗时。数据库另有固定错误码提示，凭据只记录是否配置，不记录值。`application_ready` 表示路由组装完成，`service_started` 才表示已监听。后台被拒绝时记录 `admin_access_denied`，区分后台关闭、微信身份头、仅限本机等原因；每个进程同类原因只记录一次。
+
+HTTP 响应（包括 404、503）包含 `X-Chestnut-Version` 和 `X-Chestnut-Boot-ID`。`/health` 返回相同版本、源码指纹、构建时间、数据库检查结果并禁止缓存；数据库检查失败返回 503，只在状态改变时记录日志。这样旧版本的健康 200 不会被误认作新版本上线。
+
+每次推送后执行只读验收：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/verify_deployment.py --origin https://chestnut-api-305195-11-1477663536.sh.run.tcloudbase.com --attempts 12 --interval 20
+```
+
+验收要求 `/health`、首页、`/app.js`、`/admin`、后台会话接口均返回当前 `VERSION.json` 的版本标记，数据库健康且后台运行在云模式。只有全部通过才退出 0。健康检查 200 但版本不符、页面 404 或新旧版本混合都判为尚未完成部署；需核对云托管构建来源、发布结果和入口流量分配。验收不会登录后台或修改业务数据。它不验证百炼实时翻译和手机录音链路。
+
 ### 配置与发布
 
 本项目当前可先尝试使用以下云托管 HTTPS 地址作为 Web 入口；将此键和值分别填写到**云托管待部署版本的运行时环境变量**中（不是只修改电脑上的 `.env`）：

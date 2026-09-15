@@ -126,4 +126,24 @@ class CloudBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.store, "dialect", "mysql"), patch.object(self.store, "health", create=True, side_effect=ConnectionError):
             response = await self.client.get("/health")
             self.assertEqual(response.status, 503)
-            self.assertEqual(await response.json(), {"status": "unavailable"})
+            result = await response.json()
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual(result["checks"]["database"], "unavailable")
+            self.assertEqual(result["version"], response.headers["X-Chestnut-Version"])
+
+    async def test_release_headers_identify_success_and_admin_rejection(self):
+        for path, headers, status in (("/health", {}, 200), ("/admin", {}, 200),
+                                      ("/admin", {"X-WX-OpenID": "mini-user"}, 404),
+                                      ("/missing-path", {}, 404)):
+            response = await self.client.get(path, headers=headers)
+            self.assertEqual(response.status, status)
+            self.assertEqual(response.headers["X-Chestnut-Version"], server.runtime_version()["version"])
+            self.assertEqual(response.headers["X-Chestnut-Boot-ID"], server.BOOT_ID)
+
+    async def test_health_logs_transitions_only_and_false_is_unavailable(self):
+        with patch.object(self.store, "dialect", "mysql"), \
+                patch.object(self.store, "health", create=True, side_effect=[True, True, False, False, True]), \
+                patch.object(server.LOGGER, "log") as log:
+            statuses = [(await self.client.get("/health")).status for _ in range(5)]
+            self.assertEqual(statuses, [200, 200, 503, 503, 200])
+            self.assertEqual(log.call_count, 3)

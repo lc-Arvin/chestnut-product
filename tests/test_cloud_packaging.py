@@ -58,6 +58,8 @@ async def verify():
         response = await client.get('/health')
         assert response.status == 200
         assert (await response.json())['status'] == 'ok'
+        assert response.headers['X-Chestnut-Version'] == release['version']
+        assert response.headers['Cache-Control'] == 'no-store'
         response = await client.get('/api/languages')
         assert response.status == 200
         labels = await response.json()

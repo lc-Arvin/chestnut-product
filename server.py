@@ -5,7 +5,7 @@ Alibaba Cloud Model Studio, so the DashScope API key never enters browser code.
 The same single-port service runs locally and in WeChat CloudBase Run.
 """
 
-from version_info import announce_startup_version
+from version_info import announce_startup_version, startup_stage, emit_event, runtime_version, BOOT_ID
 
 if __name__ == "__main__":
     announce_startup_version()
@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
@@ -32,13 +33,14 @@ from qcloud_cos import CosConfig, CosS3Client
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 from admin_store import AdminStore
-from admin_http import STORE_KEY, admin_boundary, mount_admin
+from admin_http import STORE_KEY, ADMIN_DENIALS_KEY, admin_boundary, mount_admin
 from local_config import load_bailian_credentials, load_local_configuration
 from trial_access import TrialRegistry, TrialSocket, enforce_trial
 from deployment import Deployment, DEPLOYMENT_KEY, deployment, client_ip, wechat_openid, secure_cookie
 
 if __name__ == "__main__":
-    load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE"))
+    with startup_stage("environment_file"):
+        load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE"))
 
 HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
@@ -183,10 +185,12 @@ def configure_logging():
         return logger
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        "%(asctime)s.%(msecs)03dZ %(levelname)s version=" + runtime_version()["version"]
+        + " boot_id=" + BOOT_ID + " %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
     )
-    stream_handler = logging.StreamHandler()
+    formatter.converter = time.gmtime
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
     if LOG_PATH is None:
@@ -903,12 +907,25 @@ async def languages_handler(_request):
 
 async def health_handler(_request):
     store = _request.app.get(STORE_KEY)
+    database = "not_configured" if store is None else "ok"
     if store and store.dialect == "mysql":
         try:
-            await asyncio.to_thread(store.health)
+            if not await asyncio.to_thread(store.health):
+                database = "unavailable"
         except Exception:
-            return web.json_response({"status": "unavailable"}, status=503, headers={"Cache-Control": "no-store"})
-    return web.json_response({"status": "ok", "service": "chestnut-api"})
+            database = "unavailable"
+    previous = _request.app[HEALTH_STATE_KEY].get("database")
+    if previous != database:
+        _request.app[HEALTH_STATE_KEY]["database"] = database
+        LOGGER.log(logging.ERROR if database == "unavailable" else logging.INFO,
+                   "event=health_state_changed database=%s", database)
+    release = runtime_version()
+    info = {key: release[key] for key in ("version", "code_ref", "source_sha256", "built_at_utc")}
+    return web.json_response({"status": "unavailable" if database == "unavailable" else "ok",
+                              "service": "chestnut-api", **info, "boot_id": BOOT_ID,
+                              "checks": {"database": database}},
+                             status=503 if database == "unavailable" else 200,
+                             headers={"Cache-Control": "no-store"})
 
 
 async def auth_status_handler(request):
@@ -1292,13 +1309,28 @@ def validate_configuration():
 VISIT_LIMITER_KEY = web.AppKey("visit_limiter", SlidingWindowLimiter)
 TRIALS_KEY = web.AppKey("trials", TrialRegistry)
 TRIAL_LIMITER_KEY = web.AppKey("trial_limiter", SlidingWindowLimiter)
+HEALTH_STATE_KEY = web.AppKey("health_state", dict)
 
 
 def create_app(*, admin_path=None):
-    validate_configuration()
-    config = Deployment.from_env()
+    with startup_stage("configuration"):
+        validate_configuration()
+        config = Deployment.from_env()
+    emit_event("configuration_validated", environment="cloud" if config.cloud else "local",
+               database=config.database, admin_enabled=config.admin_enabled or admin_path is not None,
+               transcript_storage=config.transcript_storage, public_origin=config.public_origin,
+               listen_host=HOST, listen_port=PORT,
+               bailian_key_present=bool(os.environ.get("DASHSCOPE_API_KEY")),
+               bailian_host_present=bool(os.environ.get("BAILIAN_API_HOST")))
     app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES, middlewares=[admin_boundary])
     app[DEPLOYMENT_KEY] = config
+    app[ADMIN_DENIALS_KEY] = set()
+    app[HEALTH_STATE_KEY] = {}
+
+    async def identify_response(_request, response):
+        response.headers["X-Chestnut-Version"] = runtime_version()["version"]
+        response.headers["X-Chestnut-Boot-ID"] = BOOT_ID
+    app.on_response_prepare.append(identify_response)
     app[TRIALS_KEY] = TrialRegistry(max(0, min(TRIAL_SECONDS, 900)))
     app[TRIAL_LIMITER_KEY] = SlidingWindowLimiter(10, 600)
     if admin_path is not None or config.admin_enabled or config.database == "mysql":
@@ -1307,21 +1339,31 @@ def create_app(*, admin_path=None):
         if config.database == "mysql" and admin_path is None:
             from mysql_store import MySQLAdminStore, mysql_failure_details
             try:
-                store = MySQLAdminStore()
+                with startup_stage("mysql_initialization"):
+                    store = MySQLAdminStore()
             except Exception as error:
                 reason, hint = mysql_failure_details(error)
                 LOGGER.error("event=mysql_initialization_failed error_type=%s reason=%s hint=%s",
                              type(error).__name__, reason, hint)
                 raise RuntimeError(f"MySQL initialization failed [{reason}]: {hint}") from None
         else:
-            store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
-        if config.cloud and config.admin_enabled and not store.setting("password"):
-            password = os.environ.get("CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD", "")
-            try:
-                store.setup(password)
-            except ValueError:
-                store.close()
-                raise RuntimeError("First cloud startup requires CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD (12–200 characters)") from None
+            with startup_stage("sqlite_initialization"):
+                store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
+        try:
+            with startup_stage("administrator_initialization"):
+                configured = bool(store.setting("password"))
+                if config.cloud and config.admin_enabled and not configured:
+                    password = os.environ.get("CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD", "")
+                    if not 12 <= len(password) <= 200:
+                        LOGGER.error("event=admin_bootstrap_required reason=missing_or_invalid_password variable=CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD min_length=12 max_length=200")
+                        raise RuntimeError("First cloud startup requires CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD (12–200 characters)")
+                    store.setup(password)
+                    configured = True
+                emit_event("administrator_state", enabled=config.admin_enabled or admin_path is not None,
+                           configured=configured)
+        except Exception:
+            store.close()
+            raise
 
         async def code_changed(code_id):
             for entry in list(MEETING_REGISTRY.active.values()):
@@ -1350,12 +1392,16 @@ def create_app(*, admin_path=None):
     async def shutdown(_app):
         await asyncio.gather(*(entry["socket"].close() for entry in list(MEETING_REGISTRY.active.values())), return_exceptions=True)
     app.on_shutdown.append(shutdown)
+    emit_event("application_ready", health_path="/health",
+               admin_path="/admin" if config.admin_enabled or admin_path is not None else None,
+               websocket_path="/ws")
     return app
 
 
 def main():
     announce_startup_version()
-    load_bailian_credentials()
+    with startup_stage("bailian_configuration"):
+        load_bailian_credentials()
     app = create_app()
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
 
@@ -1366,7 +1412,12 @@ def main():
             LOGGER.info("event=network_access_enabled")
         LOGGER.info("event=realtime_endpoint_ready path=/ws")
 
-    web.run_app(app, host=HOST, port=PORT, print=report_started)
+    try:
+        emit_event("listener_starting", host=HOST, port=PORT)
+        web.run_app(app, host=HOST, port=PORT, print=report_started, access_log=None)
+    except Exception as error:
+        emit_event("listener_failed", level="ERROR", error_type=type(error).__name__)
+        raise
 
 
 if __name__ == "__main__":

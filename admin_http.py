@@ -12,6 +12,7 @@ from admin_store import AdminStore
 from deployment import deployment, admin_origin, secure_cookie, client_ip
 
 STORE_KEY = web.AppKey("admin_store", AdminStore)
+ADMIN_DENIALS_KEY = web.AppKey("admin_denials", set)
 ADMIN_COOKIE = "chestnut_admin"
 ASSETS = Path(__file__).resolve().parent / "admin"
 
@@ -35,6 +36,13 @@ async def admin_boundary(request, handler):
     config = deployment(request)
     permitted = (config.admin_enabled and not request.headers.get("X-WX-OpenID")) if config.cloud else local_admin_request(request)
     if STORE_KEY not in request.app or not permitted:
+        reason = ("store_unavailable" if STORE_KEY not in request.app else
+                  "admin_disabled" if config.cloud and not config.admin_enabled else
+                  "wechat_identity_header" if config.cloud else "local_boundary")
+        seen = request.app.get(ADMIN_DENIALS_KEY)
+        if seen is not None and reason not in seen:
+            seen.add(reason)
+            logging.getLogger("chestnut").warning("event=admin_access_denied reason=%s", reason)
         raise web.HTTPNotFound()
     try:
         if request.method not in {"GET", "HEAD"}:

@@ -7,6 +7,10 @@ import asyncio
 import os
 import re
 import secrets
+import socket
+import subprocess
+import sys
+import tempfile
 import time
 import unittest
 from unittest.mock import patch
@@ -77,6 +81,44 @@ class MySQLIntegrationTests(unittest.IsolatedAsyncioTestCase):
         store = MySQLAdminStore(self.options)
         self.addCleanup(store.close)
         return store
+
+    async def test_real_cloud_process_passes_release_and_admin_verification(self):
+        from pathlib import Path
+        from scripts.verify_deployment import check_once
+        from version_info import runtime_version
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
+            env = dict(os.environ, PYTHONIOENCODING="utf-8", CHESTNUT_HOST="127.0.0.1", PORT=str(port), CHESTNUT_LOG_FILE="",
+                       CHESTNUT_ENV_FILE=str(Path(directory) / "absent.env"))
+            for name in ("host", "port", "database", "user", "password"):
+                env["CHESTNUT_MYSQL_" + name.upper()] = str(self.options[name])
+            process = subprocess.Popen([sys.executable, "server.py"], cwd=server.ROOT,
+                                       env=env, stdout=output, stderr=subprocess.STDOUT)
+            result = {"ready": False}
+            try:
+                deadline = time.monotonic() + 20
+                while process.poll() is None and time.monotonic() < deadline:
+                    result = await asyncio.to_thread(check_once, f"http://127.0.0.1:{port}", runtime_version()["version"])
+                    if result["ready"]:
+                        break
+                    await asyncio.sleep(0.2)
+                self.assertTrue(result["ready"], result)
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            output.seek(0)
+            logs = output.read()
+            self.assertFalse(self.options["password"] in logs, "Database credential leaked in process output")
+            self.assertIn('"event": "service_starting"', logs.splitlines()[0])
+            self.assertIn('"stage": "mysql_initialization"', logs)
+            self.assertIn('"event": "administrator_state"', logs)
+            self.assertIn("event=service_started", logs)
 
     async def test_quota_is_atomic_between_connections_and_survives_reopen(self):
         second = self.second_store()
