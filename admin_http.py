@@ -1,14 +1,15 @@
-"""Loopback-only admin routes, kept separate from public meeting APIs."""
+"""Web-only administration, with separate local and HTTPS cloud boundaries."""
 import asyncio
 import hmac
 import ipaddress
 import json
-import time
+import logging
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from aiohttp import web
 from admin_store import AdminStore
+from deployment import deployment, admin_origin, secure_cookie, client_ip
 
 STORE_KEY = web.AppKey("admin_store", AdminStore)
 ADMIN_COOKIE = "chestnut_admin"
@@ -31,17 +32,19 @@ async def admin_boundary(request, handler):
     is_admin = request.path in {"/admin", "/admin/"} or request.path.startswith(("/admin/", "/api/admin/"))
     if not is_admin:
         return await handler(request)
-    if STORE_KEY not in request.app or not local_admin_request(request):
+    config = deployment(request)
+    permitted = (config.admin_enabled and not request.headers.get("X-WX-OpenID")) if config.cloud else local_admin_request(request)
+    if STORE_KEY not in request.app or not permitted:
         raise web.HTTPNotFound()
     try:
         if request.method not in {"GET", "HEAD"}:
-            if request.headers.get("Origin") != f"{request.scheme}://{request.host}":
-                raise web.HTTPForbidden(text="管理操作必须来自本机后台页面")
+            if request.headers.get("Origin") != admin_origin(request):
+                raise web.HTTPForbidden(text="管理操作必须来自配置的后台页面")
             if request.content_type != "application/json":
                 raise web.HTTPUnsupportedMediaType(text="请使用 JSON 请求")
         public = {"/api/admin/session", "/api/admin/setup", "/api/admin/login"}
         if request.path.startswith("/api/admin/") and request.path not in public:
-            csrf = request.app[STORE_KEY].session(request.cookies.get(ADMIN_COOKIE, ""))
+            csrf = await asyncio.to_thread(request.app[STORE_KEY].session, request.cookies.get(ADMIN_COOKIE, ""))
             if not csrf:
                 raise web.HTTPUnauthorized(text="管理员登录已失效，请重新登录")
             if request.method not in {"GET", "HEAD"} and not hmac.compare_digest(csrf, request.headers.get("X-CSRF-Token", "")):
@@ -73,14 +76,17 @@ async def body(request):
     return value
 
 
-def mount_admin(app, store, on_code_changed):
+def mount_admin(app, store, on_code_changed, *, enabled=True):
     app[STORE_KEY] = store
 
     async def upkeep(_app):
         async def sweep():
             while True:
                 await asyncio.sleep(3600)
-                store.maintenance()
+                try:
+                    await asyncio.to_thread(store.maintenance)
+                except Exception as error:
+                    logging.getLogger("chestnut").warning("event=store_maintenance_failed error_type=%s", type(error).__name__)
         task = asyncio.create_task(sweep())
         yield
         task.cancel()
@@ -88,8 +94,11 @@ def mount_admin(app, store, on_code_changed):
     app.cleanup_ctx.append(upkeep)
 
     async def cleanup(_app):
-        store.close()
+        await asyncio.to_thread(store.close)
     app.on_cleanup.append(cleanup)
+    if not enabled:
+        return
+    login_lock = asyncio.Lock()
 
     async def asset(request):
         filename = request.match_info.get("filename") or "index.html"
@@ -98,59 +107,62 @@ def mount_admin(app, store, on_code_changed):
         return web.FileResponse(ASSETS / filename)
 
     async def session(_request):
-        csrf = store.session(_request.cookies.get(ADMIN_COOKIE, ""))
-        return web.json_response({"setup_required": not bool(store.setting("password")), "authenticated": bool(csrf), "csrf": csrf or ""})
+        csrf = await asyncio.to_thread(store.session, _request.cookies.get(ADMIN_COOKIE, ""))
+        configured = bool(await asyncio.to_thread(store.setting, "password"))
+        return web.json_response({"setup_required": not configured and not deployment(_request).cloud,
+                                  "authenticated": bool(csrf), "csrf": csrf or "",
+                                  "environment": "cloud" if deployment(_request).cloud else "local"})
 
     async def login(request):
         payload = await body(request)
-        network = store.pseudonym(request.remote)
-        with store.lock:
-            failures = store.db.execute("SELECT count(*) FROM events WHERE kind='admin_login_failure' AND network=? AND created_at>?",
-                                        (network, time.time()-600)).fetchone()[0]
-        if failures >= 5:
-            return web.json_response({"error": "登录尝试过多，请在 10 分钟后重试"}, status=429)
-        if request.path.endswith("/setup"):
-            await asyncio.to_thread(store.setup, payload.get("password"))
-        elif not await asyncio.to_thread(store.check_password, payload.get("password")):
-            store.record("admin_login_failure", ip=request.remote, channel="admin")
-            return web.json_response({"error": "密码不正确"}, status=401)
-        token, csrf = store.new_session()
-        store.record("admin_login", ip=request.remote, channel="admin")
+        ip = client_ip(request)
+        async with login_lock:
+            if await asyncio.to_thread(store.login_failures, ip) >= 5:
+                return web.json_response({"error": "登录尝试过多，请在 10 分钟后重试"}, status=429)
+            if request.path.endswith("/setup"):
+                if deployment(request).cloud:
+                    raise web.HTTPNotFound()
+                await asyncio.to_thread(store.setup, payload.get("password"))
+            elif not await asyncio.to_thread(store.check_password, payload.get("password")):
+                await asyncio.to_thread(store.record, "admin_login_failure", ip=ip, channel="admin")
+                return web.json_response({"error": "密码不正确"}, status=401)
+            token, csrf = await asyncio.to_thread(store.new_session)
+            await asyncio.to_thread(store.record, "admin_login", ip=ip, channel="admin")
         response = web.json_response({"authenticated": True, "csrf": csrf})
-        response.set_cookie(ADMIN_COOKIE, token, httponly=True, samesite="Strict", secure=request.secure, max_age=8*3600, path="/api/admin")
+        response.set_cookie(ADMIN_COOKIE, token, httponly=True, samesite="Strict", secure=secure_cookie(request), max_age=8*3600, path="/api/admin")
         return response
 
     async def logout(request):
-        store.logout(request.cookies.get(ADMIN_COOKIE, ""))
+        await asyncio.to_thread(store.logout, request.cookies.get(ADMIN_COOKIE, ""))
         response = web.json_response({"ok": True})
         response.del_cookie(ADMIN_COOKIE, path="/api/admin")
         return response
 
     async def codes(request):
         if request.method == "POST":
-            return web.json_response({"items": store.create_codes(await body(request))}, status=201)
-        return web.json_response(store.list_codes(request.query.get("q", ""), request.query.get("status", ""), int(request.query.get("page", "1")), request.query.get("sort", "created_desc")))
+            return web.json_response({"items": await asyncio.to_thread(store.create_codes, await body(request))}, status=201)
+        return web.json_response(await asyncio.to_thread(store.list_codes, request.query.get("q", ""), request.query.get("status", ""), int(request.query.get("page", "1")), request.query.get("sort", "created_desc")))
 
     async def update(request):
         code_id = request.match_info["code_id"]
-        result = store.update_code(code_id, await body(request))
+        result = await asyncio.to_thread(store.update_code, code_id, await body(request))
         await on_code_changed(code_id)
         return web.json_response(result)
 
     async def reveal(request):
-        return web.json_response({"code": store.reveal(request.match_info["code_id"])})
+        return web.json_response({"code": await asyncio.to_thread(store.reveal, request.match_info["code_id"])})
 
     async def overview(request):
-        return web.json_response(store.overview(request.query.get("start", ""), request.query.get("end", "")))
+        return web.json_response(await asyncio.to_thread(store.overview, request.query.get("start", ""), request.query.get("end", "")))
 
     async def events(request):
-        return web.json_response(store.events(request.query.get("code_id", ""), int(request.query.get("page", "1")), request.query.get("kind", "")))
+        return web.json_response(await asyncio.to_thread(store.events, request.query.get("code_id", ""), int(request.query.get("page", "1")), request.query.get("kind", "")))
 
     async def alerts(request):
-        return web.json_response(store.alerts(request.query.get("state", "open"), int(request.query.get("page", "1"))))
+        return web.json_response(await asyncio.to_thread(store.alerts, request.query.get("state", "open"), int(request.query.get("page", "1"))))
 
     async def acknowledge(request):
-        store.acknowledge(int(request.match_info["alert_id"]))
+        await asyncio.to_thread(store.acknowledge, int(request.match_info["alert_id"]))
         return web.json_response({"ok": True})
 
     app.router.add_get("/admin", asset)

@@ -47,6 +47,8 @@ def expiry(value):
 
 
 class AdminStore:
+    dialect = "sqlite"
+
     def __init__(self, path, invitations=()):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +146,7 @@ class AdminStore:
 
     def setting(self, key):
         with self.lock:
-            row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            row = self.db.execute("SELECT value FROM settings WHERE `key`=?", (key,)).fetchone()
             return row[0] if row else ""
 
     def pseudonym(self, value):
@@ -308,8 +310,9 @@ class AdminStore:
         now = time.time()
         if kind == "visit":
             day = datetime.fromtimestamp(now, CHINA).date().isoformat()
-            self.db.execute("""INSERT INTO daily_visits VALUES (?,?,?,1,?)
-                ON CONFLICT(day,client,channel) DO UPDATE SET visits=visits+1,last_at=excluded.last_at""", (day, client, channel, now))
+            upsert = ("ON DUPLICATE KEY UPDATE visits=visits+1,last_at=VALUES(last_at)" if self.dialect == "mysql" else
+                      "ON CONFLICT(day,client,channel) DO UPDATE SET visits=visits+1,last_at=excluded.last_at")
+            self.db.execute("INSERT INTO daily_visits VALUES (?,?,?,1,?) " + upsert, (day, client, channel, now))
             return
         if kind == "meeting_ended":
             return
@@ -337,10 +340,17 @@ class AdminStore:
     def _alert(self, kind, code_id, subject, window, detail):
         now = time.time()
         fingerprint = f"{kind}:{code_id}:{subject}:{int(now//window)}"
+        upsert = ("ON DUPLICATE KEY UPDATE last_at=VALUES(last_at),occurrences=occurrences+1,detail=VALUES(detail),acknowledged_at=NULL"
+                  if self.dialect == "mysql" else "ON CONFLICT(fingerprint) DO UPDATE SET "
+                  "last_at=excluded.last_at,occurrences=alerts.occurrences+1,detail=excluded.detail,acknowledged_at=NULL")
         self.db.execute("""INSERT INTO alerts (fingerprint,kind,code_id,subject,first_at,last_at,occurrences,detail)
-            VALUES (?,?,?,?,?,?,1,?) ON CONFLICT(fingerprint) DO UPDATE SET
-            last_at=excluded.last_at,occurrences=alerts.occurrences+1,detail=excluded.detail,acknowledged_at=NULL""",
+            VALUES (?,?,?,?,?,?,1,?) """ + upsert,
             (fingerprint, kind, code_id, subject, now, now, detail))
+
+    def login_failures(self, ip):
+        with self.lock:
+            return self.db.execute("SELECT count(*) FROM events WHERE kind='admin_login_failure' AND network=? AND created_at>?",
+                                   (self.pseudonym(ip), time.time()-600)).fetchone()[0]
 
     def redeem(self, candidate, client, ip, channel):
         if not isinstance(candidate, str) or len(candidate) > 200:

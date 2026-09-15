@@ -28,9 +28,12 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 from admin_store import AdminStore
 from admin_http import STORE_KEY, admin_boundary, mount_admin
-from local_config import load_bailian_credentials
+from local_config import load_bailian_credentials, load_local_configuration
 from trial_access import TrialRegistry, TrialSocket, enforce_trial
+from deployment import Deployment, DEPLOYMENT_KEY, deployment, client_ip, wechat_openid, secure_cookie
 
+if __name__ == "__main__":
+    load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE"))
 
 HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
@@ -53,7 +56,8 @@ def parse_language_pair(value=None):
 MAX_TRANSCRIPT_BYTES = 5_000_000
 COS_BUCKET = os.environ.get("CHESTNUT_COS_BUCKET", "").strip()
 COS_REGION = os.environ.get("TENCENTCLOUD_REGION", os.environ.get("CHESTNUT_COS_REGION", "")).strip()
-LOG_PATH = Path(os.environ.get("CHESTNUT_LOG_FILE", ROOT / "logs" / "chestnut.log"))
+_log_file = os.environ.get("CHESTNUT_LOG_FILE", "" if os.environ.get("CHESTNUT_ENV") == "cloud" else str(ROOT / "logs" / "chestnut.log"))
+LOG_PATH = Path(_log_file) if _log_file else None
 CLOUD_SEND_TIMEOUT_SECONDS = float(os.environ.get("CHESTNUT_CLOUD_SEND_TIMEOUT", "10"))
 CLOUD_RESPONSE_TIMEOUT_SECONDS = float(os.environ.get("CHESTNUT_CLOUD_RESPONSE_TIMEOUT", "60"))
 def safe_invite_label(value, code=""):
@@ -180,6 +184,8 @@ def configure_logging():
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
+    if LOG_PATH is None:
+        return logger
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
@@ -257,8 +263,7 @@ def verify_access_token(token, signing_secret=None):
 
 
 def request_ip(request):
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    return forwarded or request.remote or "unknown"
+    return client_ip(request)
 
 
 def request_token(request):
@@ -269,7 +274,7 @@ def request_token(request):
 
 
 def request_identity(request, token=None):
-    wechat_openid = request.headers.get("x-wx-openid", "").strip()
+    openid = wechat_openid(request)
     store = request.app.get(STORE_KEY)
     identity = verify_access_token(request_token(request) if token is None else token,
                                    AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
@@ -278,8 +283,8 @@ def request_identity(request, token=None):
             identity = None
     elif store and identity and not store.token_valid(identity.code_id, identity.code_version):
         identity = None
-    if wechat_openid:
-        subject = f"wechat-{safe_owner_id(wechat_openid)}"
+    if openid:
+        subject = f"wechat-{safe_owner_id(openid)}"
         if identity and identity.kind == "wechat" and identity.subject == subject:
             return identity
         if not authentication_required(request):
@@ -296,18 +301,24 @@ def authentication_required(request):
     return AUTH_REQUIRED or STORE_KEY in request.app
 
 
-def record_activity(request, kind, identity=None, reason="", meeting=""):
+async def record_activity(request, kind, identity=None, reason="", meeting=""):
     store = request.app.get(STORE_KEY)
     if store:
-        store.record(kind, code_id=identity.code_id if identity else "",
-                     client=identity.subject if identity else "", ip=request_ip(request),
-                     channel=identity.kind if identity else "web", reason=reason, meeting=meeting)
+        try:
+            await asyncio.to_thread(store.record, kind, code_id=identity.code_id if identity else "",
+                         client=identity.subject if identity else "", ip=request_ip(request),
+                         channel=identity.kind if identity else "web", reason=reason, meeting=meeting)
+        except Exception as error:
+            # Analytics failure must not bypass the socket/meeting cleanup path.
+            LOGGER.warning("event=activity_store_unavailable error_type=%s", type(error).__name__)
 
 
 def origin_is_allowed(request):
     origin = request.headers.get("origin", "").strip().rstrip("/")
     if not origin:
         return True
+    if deployment(request).cloud:
+        return origin == deployment(request).public_origin
     if ALLOWED_ORIGINS:
         return origin in ALLOWED_ORIGINS
     try:
@@ -461,7 +472,7 @@ def save_local_transcript(filename, content, owner_id):
     }
 
 
-def save_cos_transcript(filename, content, owner_id):
+def cos_client():
     secret_id = os.environ.get("TENCENTCLOUD_SECRETID") or os.environ.get("CHESTNUT_COS_SECRET_ID", "")
     secret_key = os.environ.get("TENCENTCLOUD_SECRETKEY") or os.environ.get("CHESTNUT_COS_SECRET_KEY", "")
     token = os.environ.get("TENCENTCLOUD_SESSIONTOKEN") or os.environ.get("CHESTNUT_COS_SESSION_TOKEN", "")
@@ -477,14 +488,50 @@ def save_cos_transcript(filename, content, owner_id):
         Token=token or None,
         Scheme="https",
     )
+    return CosS3Client(config)
+
+
+def save_cos_transcript(filename, content, owner_id):
+    filename = filename.removesuffix(".md") + "-" + secrets.token_hex(6) + ".md"
     object_key = f"meetings/{safe_owner_id(owner_id)}/{filename}"
-    CosS3Client(config).put_object(
+    cos_client().put_object(
         Bucket=COS_BUCKET,
         Key=object_key,
         Body=content.encode("utf-8"),
         ContentType="text/markdown; charset=utf-8",
     )
-    return {"filename": filename, "storage": "cos", "object_key": object_key}
+    return {"filename": filename, "storage": "cos", "object_key": object_key,
+            "url": f"/meetings/{safe_owner_id(owner_id)}/{filename}"}
+
+
+def read_cos_transcript(owner, filename):
+    from qcloud_cos.cos_exception import CosServiceError
+    try:
+        result = cos_client().get_object(Bucket=COS_BUCKET, Key=f"meetings/{owner}/{filename}")
+        stream = result["Body"].get_raw_stream()
+        try:
+            return stream.read()
+        finally:
+            stream.close()
+    except CosServiceError as error:
+        if error.get_status_code() == 404:
+            return None
+        raise
+
+
+def save_request_transcript(request, payload, owner, label):
+    storage = deployment(request).transcript_storage
+    if storage == "mysql":
+        filename, content = render_meeting_transcript(payload, label)
+        return request.app[STORE_KEY].save_transcript(filename, content, safe_owner_id(owner))
+    # Preserve the public helper used by local integrations and tests.
+    if storage == "cos":
+        filename, content = render_meeting_transcript(payload, label)
+        return save_cos_transcript(filename, content, owner)
+    if COS_BUCKET:
+        filename, content = render_meeting_transcript(payload, label)
+        return save_local_transcript(filename, content, owner)
+    return save_meeting_transcript(payload, owner, label)
 
 
 def save_meeting_transcript(payload, owner_id="", filename_label=""):
@@ -850,11 +897,17 @@ async def languages_handler(_request):
 
 
 async def health_handler(_request):
+    store = _request.app.get(STORE_KEY)
+    if store and store.dialect == "mysql":
+        try:
+            await asyncio.to_thread(store.health)
+        except Exception:
+            return web.json_response({"status": "unavailable"}, status=503, headers={"Cache-Control": "no-store"})
     return web.json_response({"status": "ok", "service": "chestnut-api"})
 
 
 async def auth_status_handler(request):
-    identity = request_identity(request)
+    identity = await asyncio.to_thread(request_identity, request)
     result = {
         "auth_required": authentication_required(request),
         "authenticated": identity is not None,
@@ -866,7 +919,7 @@ async def auth_status_handler(request):
     enabled = result["auth_required"] and registry.duration > 0
     client_id = request.headers.get("X-Chestnut-Client-ID", "")
     store = request.app.get(STORE_KEY)
-    subject = identity.subject if identity else client_subject(client_id, request.headers.get("x-wx-openid", "").strip(), AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
+    subject = identity.subject if identity else client_subject(client_id, wechat_openid(request), AUTH_SECRET or store.signing_secret if store else AUTH_SECRET)
     result["trial"] = {"enabled": enabled, "available": enabled and not identity and subject not in registry.by_subject, "duration_seconds": registry.duration}
     if identity and identity.trial_id:
         trial = registry.get(identity.trial_id, identity.subject)
@@ -876,7 +929,7 @@ async def auth_status_handler(request):
     elif identity and result["auth_required"]:
         store = request.app.get(STORE_KEY)
         result["access_mode"] = "invitation"
-        result["invitation_expires_at"] = store.invitation_expiry(identity.code_id) if store else None
+        result["invitation_expires_at"] = await asyncio.to_thread(store.invitation_expiry, identity.code_id) if store else None
     return web.json_response(result, headers={"Cache-Control": "no-store"})
 
 
@@ -888,7 +941,7 @@ async def trial_auth_handler(request):
         return web.json_response({"error": "Trial is not available."}, status=403)
     if not request.app[TRIAL_LIMITER_KEY].allow(request_ip(request)):
         return web.json_response({"error": "Too many attempts. Please wait and try again."}, status=429)
-    identity = request_identity(request)
+    identity = await asyncio.to_thread(request_identity, request)
     if identity and not identity.trial_id:
         return web.json_response({"error": "Your invitation already provides access."}, status=409)
     try:
@@ -900,7 +953,7 @@ async def trial_auth_handler(request):
         return web.json_response({"error": "Invalid request."}, status=400)
     store = request.app.get(STORE_KEY)
     secret = AUTH_SECRET or store.signing_secret if store else AUTH_SECRET
-    openid = request.headers.get("x-wx-openid", "").strip()
+    openid = wechat_openid(request)
     try:
         trial = registry.claim(client_subject(client_id, openid, secret))
     except ValueError as error:
@@ -913,14 +966,14 @@ async def trial_auth_handler(request):
         result["access_token"] = token
     response = web.json_response(result, headers={"Cache-Control": "no-store"})
     if payload.get("client_type") != "miniprogram":
-        response.set_cookie("chestnut_access", token, max_age=3600, httponly=True, secure=request.secure, samesite="Strict", path="/")
+        response.set_cookie("chestnut_access", token, max_age=3600, httponly=True, secure=secure_cookie(request), samesite="Strict", path="/")
     return response
 
 
 async def finish_trial_handler(request):
     if not origin_is_allowed(request):
         raise web.HTTPForbidden(text="Origin not allowed")
-    identity = request_identity(request)
+    identity = await asyncio.to_thread(request_identity, request)
     if not identity or not identity.trial_id:
         raise web.HTTPUnauthorized()
     registry = request.app[TRIALS_KEY]
@@ -934,7 +987,7 @@ async def invite_auth_handler(request):
         raise web.HTTPForbidden(text="Origin not allowed")
     if not LOGIN_LIMITER.allow(ip):
         LOGGER.warning("event=invite_rate_limited ip=%s", ip)
-        record_activity(request, "invite_rate_limited")
+        await record_activity(request, "invite_rate_limited")
         return web.json_response({"error": "Too many attempts. Please wait before trying again."}, status=429)
     if not authentication_required(request):
         return web.json_response({"auth_required": False})
@@ -949,12 +1002,12 @@ async def invite_auth_handler(request):
     if not 8 <= len(client_id) <= 200 or not isinstance(code, str) or len(code) > 200:
         return web.json_response({"error": "Invalid request."}, status=400)
     store = request.app.get(STORE_KEY)
-    openid = request.headers.get("x-wx-openid", "").strip()
+    openid = wechat_openid(request)
     managed_code = None
     if store:
         # Stable Web and WeChat subjects match visit/event pseudonyms.
         subject = client_subject(client_id, openid, AUTH_SECRET or store.signing_secret)
-        managed_code = store.redeem(code, subject, ip, "wechat" if openid else "web")
+        managed_code = await asyncio.to_thread(store.redeem, code, subject, ip, "wechat" if openid else "web")
         invite_label = managed_code["label"] if managed_code else None
     else:
         invite_label = invitation_label(code)
@@ -973,13 +1026,12 @@ async def invite_auth_handler(request):
     response = web.json_response(result, headers={"Cache-Control": "no-store"})
     if payload.get("client_type") == "miniprogram":
         return response
-    forwarded_scheme = request.headers.get("x-forwarded-proto", request.scheme).split(",", 1)[0].strip()
     response.set_cookie(
         "chestnut_access",
         token,
         max_age=WEB_TOKEN_TTL_SECONDS,
         httponly=True,
-        secure=forwarded_scheme == "https",
+        secure=secure_cookie(request),
         samesite="Strict",
         path="/",
     )
@@ -1015,17 +1067,22 @@ async def visit_handler(request):
         return web.json_response({"error": "Invalid request."}, status=400)
     if not request.app[VISIT_LIMITER_KEY].allow(request_ip(request)):
         return web.json_response({"recorded": False}, status=429)
-    openid = request.headers.get("x-wx-openid", "").strip()
+    openid = wechat_openid(request)
     subject = client_subject(client_id, openid, AUTH_SECRET or store.signing_secret)
     channel = "wechat" if openid else "miniprogram" if payload.get("channel") == "miniprogram" else "web"
-    store.record("visit", client=subject, ip=request_ip(request), channel=channel)
+    await asyncio.to_thread(store.record, "visit", client=subject, ip=request_ip(request), channel=channel)
     return web.json_response({"recorded": True}, headers={"Cache-Control": "no-store"})
 
 
 async def guard_managed_access(browser, store, identity):
     while True:
         await asyncio.sleep(2)
-        if not store.token_valid(identity.code_id, identity.code_version):
+        try:
+            valid = await asyncio.to_thread(store.token_valid, identity.code_id, identity.code_version)
+        except Exception as error:
+            LOGGER.warning("event=access_store_unavailable error_type=%s", type(error).__name__)
+            valid = False
+        if not valid:
             await browser.send(json.dumps({"type": "access.denied", "error": {"message": "Invitation access is no longer available."}}))
             await browser.close()
             return
@@ -1038,7 +1095,7 @@ async def websocket_handler(request):
     socket = web.WebSocketResponse(max_msg_size=0, heartbeat=10)
     await socket.prepare(request)
     browser = AiohttpSocket(socket)
-    identity = request_identity(request)
+    identity = await asyncio.to_thread(request_identity, request)
     if request.query.get("auth") == "message":
         # Mini-program cloud sockets do not need custom handshake headers.
         # No model connection or audio relay exists before authentication.
@@ -1052,11 +1109,11 @@ async def websocket_handler(request):
             token = payload.get("token", "")
             if not isinstance(token, str):
                 raise ValueError("Invalid token")
-            identity = request_identity(request, token)
+            identity = await asyncio.to_thread(request_identity, request, token)
         except (ValueError, TypeError, asyncio.TimeoutError):
             identity = None
     if not identity:
-        record_activity(request, "access_denied", reason="websocket")
+        await record_activity(request, "access_denied", reason="websocket")
         await browser.send(json.dumps({
             "type": "access.denied",
             "error": {"message": "Your access has expired. Enter the invitation code again."},
@@ -1064,7 +1121,7 @@ async def websocket_handler(request):
         await socket.close(code=1008, message=b"Authentication required")
         return socket
     if not CONNECTION_LIMITER.allow(f"{identity.subject}:{ip}"):
-        record_activity(request, "connection_limited", identity)
+        await record_activity(request, "connection_limited", identity)
         await browser.send(json.dumps({
             "type": "connection.rate_limited",
             "message": "Too many connection attempts. Please wait and try again.",
@@ -1087,14 +1144,14 @@ async def websocket_handler(request):
         return socket
     session_key, previous_socket, error = await MEETING_REGISTRY.acquire(identity, meeting_id, browser)
     if error:
-        record_activity(request, "meeting_rejected", identity, reason=error, meeting=meeting_id)
+        await record_activity(request, "meeting_rejected", identity, reason=error, meeting=meeting_id)
         await browser.send(json.dumps({"type": "meeting.rejected", "message": error}))
         await socket.close(code=1008, message=b"Meeting unavailable")
         return socket
     if previous_socket:
         await previous_socket.close()
     LOGGER.info("event=meeting_admitted owner=%s kind=%s meeting=%s", identity.subject, identity.kind, meeting_id)
-    record_activity(request, "meeting_started", identity, meeting=meeting_id)
+    await record_activity(request, "meeting_started", identity, meeting=meeting_id)
     store = request.app.get(STORE_KEY)
     access_guard = asyncio.create_task(guard_managed_access(browser, store, identity)) if store and not trial else None
     try:
@@ -1122,7 +1179,7 @@ async def websocket_handler(request):
         if access_guard:
             access_guard.cancel()
             await asyncio.gather(access_guard, return_exceptions=True)
-        record_activity(request, "meeting_ended", identity, meeting=meeting_id)
+        await record_activity(request, "meeting_ended", identity, meeting=meeting_id)
         await MEETING_REGISTRY.release(identity, session_key)
         if not socket.closed:
             await socket.close()
@@ -1133,7 +1190,7 @@ async def save_meeting_handler(request):
     try:
         if not origin_is_allowed(request):
             raise web.HTTPForbidden(text="Origin not allowed")
-        identity = request_identity(request)
+        identity = await asyncio.to_thread(request_identity, request)
         if not identity:
             return web.json_response({"error": "Authentication required."}, status=401)
         if request.content_length is not None and request.content_length > MAX_TRANSCRIPT_BYTES:
@@ -1150,11 +1207,11 @@ async def save_meeting_handler(request):
             async with trial.save_lock:
                 if trial.saved:
                     return web.json_response(trial.saved, status=201)
-                saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
+                saved = await asyncio.to_thread(save_request_transcript, request, payload, identity.subject, filename_label)
                 trial.saved = saved
         else:
-            saved = await asyncio.to_thread(save_meeting_transcript, payload, identity.subject, filename_label)
-        record_activity(request, "transcript_saved", identity)
+            saved = await asyncio.to_thread(save_request_transcript, request, payload, identity.subject, filename_label)
+        await record_activity(request, "transcript_saved", identity)
         LOGGER.info(
             "event=transcript_saved storage=%s entries=%d filename=%s",
             saved["storage"],
@@ -1183,13 +1240,28 @@ async def static_handler(request):
 
 
 async def meeting_file_handler(request):
-    identity = request_identity(request)
+    identity = await asyncio.to_thread(request_identity, request)
     if not identity:
         raise web.HTTPUnauthorized(text="Authentication required")
     owner = safe_owner_id(request.match_info["owner"])
     if owner != safe_owner_id(identity.subject):
         raise web.HTTPForbidden(text="This transcript belongs to another account")
     filename = Path(request.match_info["filename"]).name
+    if filename != request.match_info["filename"] or not filename.endswith(".md"):
+        raise web.HTTPNotFound()
+    storage = deployment(request).transcript_storage
+    if storage in {"mysql", "cos"}:
+        try:
+            reader = request.app[STORE_KEY].read_transcript if storage == "mysql" else read_cos_transcript
+            content = await asyncio.to_thread(reader, owner, filename)
+        except Exception as error:
+            LOGGER.warning("event=transcript_read_failed error_type=%s", type(error).__name__)
+            raise web.HTTPServiceUnavailable(text="Transcript storage is unavailable") from None
+        if content is None:
+            raise web.HTTPNotFound()
+        return web.Response(body=content.encode("utf-8") if isinstance(content, str) else content,
+                            content_type="text/markdown", charset="utf-8",
+                            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
     owner_dir = (
         ROOT / "meetings" if owner == "local-anonymous" else ROOT / "meetings" / owner
     ).resolve()
@@ -1219,24 +1291,41 @@ TRIAL_LIMITER_KEY = web.AppKey("trial_limiter", SlidingWindowLimiter)
 
 def create_app(*, admin_path=None):
     validate_configuration()
+    config = Deployment.from_env()
     app = web.Application(client_max_size=MAX_TRANSCRIPT_BYTES, middlewares=[admin_boundary])
+    app[DEPLOYMENT_KEY] = config
     app[TRIALS_KEY] = TrialRegistry(max(0, min(TRIAL_SECONDS, 900)))
     app[TRIAL_LIMITER_KEY] = SlidingWindowLimiter(10, 600)
-    if admin_path is not None or os.environ.get("CHESTNUT_ADMIN_ENABLED") == "1":
+    if admin_path is not None or config.admin_enabled or config.database == "mysql":
         if WEB_TOKEN_TTL_SECONDS <= 0:
             raise RuntimeError("CHESTNUT_WEB_TOKEN_TTL_SECONDS must be greater than zero")
-        store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
+        if config.database == "mysql" and admin_path is None:
+            from mysql_store import MySQLAdminStore
+            try:
+                store = MySQLAdminStore()
+            except Exception as error:
+                LOGGER.error("event=mysql_initialization_failed error_type=%s", type(error).__name__)
+                raise RuntimeError("MySQL initialization failed; check database, permissions and connection settings") from None
+        else:
+            store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
+        if config.cloud and config.admin_enabled and not store.setting("password"):
+            password = os.environ.get("CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD", "")
+            try:
+                store.setup(password)
+            except ValueError:
+                store.close()
+                raise RuntimeError("First cloud startup requires CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD (12–200 characters)") from None
 
         async def code_changed(code_id):
             for entry in list(MEETING_REGISTRY.active.values()):
                 identity = entry["identity"]
-                if identity.code_id == code_id and not store.token_valid(code_id, identity.code_version):
+                if identity.code_id == code_id and not await asyncio.to_thread(store.token_valid, code_id, identity.code_version):
                     try:
                         await entry["socket"].send(json.dumps({"type": "access.denied", "error": {"message": "Invitation access was disabled."}}))
                         await entry["socket"].close()
                     except Exception:
                         LOGGER.warning("event=admin_socket_close_failed")
-        mount_admin(app, store, code_changed)
+        mount_admin(app, store, code_changed, enabled=config.admin_enabled or admin_path is not None)
         app[VISIT_LIMITER_KEY] = SlidingWindowLimiter(120, 60)
     app.router.add_get("/api/languages", languages_handler)
     app.router.add_get("/health", health_handler)
@@ -1250,6 +1339,10 @@ def create_app(*, admin_path=None):
     app.router.add_post("/api/meetings", save_meeting_handler)
     app.router.add_get("/meetings/{owner}/{filename}", meeting_file_handler)
     app.router.add_get("/{path:.*}", static_handler)
+
+    async def shutdown(_app):
+        await asyncio.gather(*(entry["socket"].close() for entry in list(MEETING_REGISTRY.active.values())), return_exceptions=True)
+    app.on_shutdown.append(shutdown)
     return app
 
 

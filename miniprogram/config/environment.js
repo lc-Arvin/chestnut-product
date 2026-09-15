@@ -6,6 +6,9 @@ const STORAGE_KEY = "chestnut_server_host";
 // keeps the Mini Program in local/LAN development mode.
 const CLOUD_ENV_ID = "chestnut-prod-d6ggcq8yzf8d2e322";
 const CLOUD_SERVICE = "chestnut-api";
+// auto: developer builds use local/LAN; trial/release builds use Cloud Run.
+// Set cloud to test the deployed service in developer tools, or local for LAN.
+const TRANSPORT_MODE = "auto";
 
 function cleanHost(value) {
   return String(value || "")
@@ -32,6 +35,10 @@ function isLoopbackHost(host) {
 }
 
 function isCloudEnabled() {
+  if (TRANSPORT_MODE === "local") return false;
+  if (TRANSPORT_MODE === "auto" && typeof wx.getAccountInfoSync === "function") {
+    if (wx.getAccountInfoSync().miniProgram.envVersion === "develop") return false;
+  }
   return Boolean(CLOUD_ENV_ID && CLOUD_SERVICE);
 }
 
@@ -52,6 +59,7 @@ module.exports = {
   DEFAULT_SERVER_HOST,
   CLOUD_ENV_ID,
   CLOUD_SERVICE,
+  TRANSPORT_MODE,
   getServerHost,
   setServerHost,
   isLoopbackHost,

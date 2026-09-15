@@ -2,6 +2,8 @@
 
 这是 ChestnutOne 的原生微信小程序客户端。它与仓库根目录的 Web 控制台共用 `server.py`，小程序代码中不包含百炼 API Key。
 
+本地与微信云托管的完整配置见 [云端部署说明](../docs/CLOUD_DEPLOYMENT.md)。`config/environment.js` 中 `TRANSPORT_MODE=auto` 会让开发版走本地/LAN、体验版和正式版走云端；开发工具调试云服务时设为 `cloud`，并核对 `CLOUD_ENV_ID` 与 `CLOUD_SERVICE`。
+
 ## 当前能力
 
 - Meeting Setup 与本地服务地址配置
@@ -12,7 +14,7 @@
 - Pause / Resume / Stop
 - 10 分钟录音上限前自动续录
 - 中断和断线状态提示
-- Stop 后由电脑端保存统一 Markdown 会议稿
+- Stop 后由共用服务保存 Markdown 会议稿：本地文件、MySQL 或可选 COS
 
 ## 在微信开发者工具中运行
 
@@ -25,7 +27,7 @@
 1. 打开微信开发者工具。
 2. 选择「导入项目」。
 3. 项目目录选择本仓库的 `miniprogram/`。
-4. 当前 `project.config.json` 使用 `touristappid`，可以先以测试号运行模拟器。
+4. 核对 `project.config.json` 中的 AppID。云托管调用须使用已与目标环境关联的真实 AppID。
 5. 在「详情 → 本地设置」中确认开发阶段不校验合法域名、TLS 版本及 HTTPS 证书。
 6. 编译后，Setup 页面本地服务地址保持 `127.0.0.1`。
 

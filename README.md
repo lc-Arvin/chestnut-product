@@ -1,6 +1,6 @@
 # ChestnutOne
 
-ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品。仓库同时包含 Web 控制台和原生微信小程序 MVP，两端共用本地 Python 百炼安全桥接服务。
+ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品。仓库同时包含 Web 控制台和原生微信小程序 MVP，两端共用支持本地与微信云托管的 Python 百炼安全桥接服务。
 
 ## 客户端
 
@@ -17,7 +17,7 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 
 后台支持批量生成 6 位数字邀请码、明文查看和复制、标签/备注搜索、快捷有效期、生成/失效时间排序、临近过期高亮、成功验证次数上限和停用/恢复，以及每日访问、按码使用情况和异常提示。活动记录自动合并重复接入，访问按日汇总，历史默认保留 90 天。数据持久保存在 `data/admin.sqlite3`，已排除 Git 和 Docker 打包。具体操作、统计口径、验证方式和本地边界见 [`docs/LOCAL_ADMIN.md`](docs/LOCAL_ADMIN.md)。
 
-后台默认关闭，不改变原有启动方式。使用本地管理启动器时将开启邀请码保护：即使没有生成码，也不会回退到免验证模式。管理页面仅允许直接从本机访问；这里的本地实验没有接入线上访问数据。
+使用本地管理启动器时将开启邀请码保护：即使没有生成码，也不会回退到免验证模式。上述本地后台仅允许直接从本机访问；云端 Web 后台的配置见下方部署说明。
 
 当前版本包含完整的会议操作流程：
 
@@ -114,58 +114,19 @@ CHESTNUT_HOST="0.0.0.0"
 
 ## 微信云托管
 
-仓库根目录包含云托管使用的 `Dockerfile`。容器将 HTTP、WebSocket 统一监听在端口 80：
+完整部署与配置说明见 [`docs/CLOUD_DEPLOYMENT.md`](docs/CLOUD_DEPLOYMENT.md)，完整变量模板为 [`.env.example`](.env.example)，云端模板为 [`.env.cloud.example`](.env.cloud.example)。
 
-```text
-GET  /health        健康检查
-GET  /ws            实时音频与字幕 WebSocket
-POST /api/meetings  保存会议稿
-```
+本地继续使用 SQLite 和本地文件；云端使用全新的 MySQL 库，默认将 Markdown 会议稿一并存入 MySQL，也可选择私有 COS。不会同步或导入本地数据。管理后台通过 HTTPS Web 访问，小程序不提供管理入口；云端初始管理员密码由部署配置设置。
 
-在 `miniprogram/config/environment.js` 填写 `CLOUD_ENV_ID` 后，小程序会自动改用 `wx.cloud.connectContainer` 和 `wx.cloud.callContainer`；保持为空则继续使用本地局域网服务。
+容器统一监听端口 8080，启动命令 `python server.py`，健康检查 `/health`。镜像默认云端模式，缺少必要配置会拒绝启动。第一版须配置单实例、单进程，试用计时和在线会议状态尚未迁移到共享存储。
 
-云托管服务需要设置 `DASHSCOPE_API_KEY` 与 `BAILIAN_API_HOST` 环境变量。不要把真实密钥写进代码。
+小程序 `miniprogram/config/environment.js` 的 `TRANSPORT_MODE=auto` 在开发版使用本地/LAN，在体验版及正式版使用云托管。开发工具联调云端时设为 `cloud`；`CLOUD_ENV_ID`、`CLOUD_SERVICE` 须填写实际环境和服务名。
 
-设置 `CHESTNUT_COS_BUCKET` 后，会议稿会写入对象存储的 `meetings/{OpenID}/` 路径。地域默认读取 `TENCENTCLOUD_REGION`，也可通过 `CHESTNUT_COS_REGION` 配置。凭证优先使用云托管临时凭证；容器环境未注入凭证时，使用仅授权当前 Bucket 的 `CHESTNUT_COS_SECRET_ID` 与 `CHESTNUT_COS_SECRET_KEY` 子账号凭证。不要使用主账号密钥。未设置存储桶时，本地开发仍写入仓库的 `meetings/` 目录。
+## Web 与小程序访问控制
 
-如需独立验证 COS 子账号，执行：
+用户可公开浏览服务页，开始会议时使用邀请码或短期试用。MySQL 模式始终启用保护，邀请码通过 Web 后台创建；`CHESTNUT_WEB_INVITE_CODES` 仅保留旧本地兼容用途，不导入云库。
 
-```bash
-.venv/bin/python scripts/test_cos_access.py
-```
-
-按提示输入 Bucket、地域和凭证。SecretKey 使用隐藏输入，不会写入文件或终端历史。脚本不会打印 SecretKey，只会在 `meetings/_diagnostics/` 写入一个可安全删除的小文件。
-
-## Web 私测访问控制
-
-公网 Web 服务建议先使用邀请码保护。在云托管服务中配置：
-
-```text
-CHESTNUT_WEB_INVITE_CODES="customer-a=code-for-customer-a,customer-b=code-for-customer-b"
-CHESTNUT_AUTH_SECRET="至少32字符、随机生成并长期保持不变的签名密钥"
-CHESTNUT_WEB_TOKEN_TTL_SECONDS="43200"
-CHESTNUT_MAX_MEETING_SECONDS="3600"
-CHESTNUT_MEETING_WARNING_SECONDS="300"
-CHESTNUT_MAX_CONCURRENT_MEETINGS="20"
-CHESTNUT_ALLOWED_ORIGINS="https://your-web-domain.example"
-```
-
-配置邀请码后，Web 和小程序均可公开浏览服务首页；点击开始会议时才检查凭证，未验证或凭证过期时弹出邀请码窗口。验证成功后自动进入麦克风检测。实时翻译和会议稿接口都要求有效凭证。服务通过 `HttpOnly` Cookie 保存有时效的签名凭证，凭证不会出现在 WebSocket URL 中，页面脚本也无法读取。API Key 和签名密钥都不会进入前端。不同浏览器会得到独立用户标识，会议稿按标识隔离。
-
-`CHESTNUT_MAX_MEETING_SECONDS` 是 Web 与云托管小程序单场会议的服务端时间上限，默认 `3600` 秒；设为 `0` 表示不限制。`CHESTNUT_MEETING_WARNING_SECONDS` 控制结束前多少秒显示倒计时提醒，到期后两端都会停止收音并自动保存会议稿。本地匿名桌面模式不应用该限制。邀请码推荐使用 `客户标签=真实邀请码` 格式，会议稿文件名会使用客户标签，例如 `web-2026-09-05-customer-a-143022.md`，不会泄露真实邀请码。服务达到 `CHESTNUT_MAX_CONCURRENT_MEETINGS` 配置的并发数量后会拒绝新会议。同一用户只能进行一场会议，同一场会议的网络重连会替换旧连接。
-
-登录和 WebSocket 建连频率分别通过以下变量控制：
-
-```text
-CHESTNUT_LOGIN_RATE_LIMIT="5"
-CHESTNUT_LOGIN_RATE_WINDOW_SECONDS="600"
-CHESTNUT_CONNECTION_RATE_LIMIT="10"
-CHESTNUT_CONNECTION_RATE_WINDOW_SECONDS="60"
-```
-
-当前并发登记和频率限制保存在单个服务实例内。私测阶段应将云托管最大实例数设为 `1`；正式横向扩容前，需要迁移到 Redis 等共享状态服务。
-
-未配置 `CHESTNUT_WEB_INVITE_CODES` 时，两端保持开发模式，不要求邀请码。该配置名为兼容旧部署保留，现在统一控制两端。云托管小程序通过可信网关注入的 `x-wx-openid` 识别用户，同时必须携带邀请码验证后签发的凭证；不能只凭 OpenID 访问受保护接口。
+Web 使用 HttpOnly Cookie，小程序使用签名 token，百炼密钥仅在服务端。邀请码到期或停用后撤销访问；会议稿按用户隔离。云端使用 `CHESTNUT_PUBLIC_ORIGIN` 检查 Web 来源，并仅信任指定网关的转发身份。单场时长、并发和验证限流的逐项配置见部署文档。
 
 ## 安全说明
 
@@ -215,4 +176,4 @@ Web 的 Meeting Setup 使用两个语言下拉框；微信小程序点击「会�
 3. 微信开发者工具上传同一版本的 `miniprogram/`，设置为体验版，提醒体验用户重新打开。服务端启用后旧小程序将无法直接开始会议，应安排同步更新。
 4. 用 Web 无痕窗口和微信体验成员分别验证公开浏览、取消、错误码、成功继续、重连与到期保存。微信体验成员权限和产品邀请码为两层独立权限。
 
-回归命令：`python -m unittest discover -s tests`；`node --test tests/test_access.cjs tests/test_languages.cjs`。不调用付费模型。尚需微信真机验收云托管通道和麦克风权限弹窗。
+回归命令：`python -m unittest discover -s tests`；`node --test tests/test_access.cjs tests/test_languages.cjs tests/test_environment.cjs`。不调用付费模型。尚需微信真机验收云托管通道和麦克风权限弹窗。

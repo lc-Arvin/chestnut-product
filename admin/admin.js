@@ -336,6 +336,9 @@ async function boot() {
   dateRange(7);
   try {
     const result = await api("session"); state.setup = result.setup_required;
+    const cloud = result.environment === "cloud";
+    document.querySelectorAll(".local-dot").forEach(element => { element.textContent = cloud ? "云端" : "本地"; });
+    $("#admin-access-note").textContent = `${cloud ? "通过 HTTPS 安全访问" : "仅本机可访问"} · 管理员密码与会议邀请码相互独立`;
     if (result.authenticated) { state.csrf = result.csrf; $("#login-screen").hidden = true; $("#workspace").hidden = false; await run(async () => { await Promise.all([loadCodes(), summary()]); }); }
     else showLogin();
   } catch { $("#login-error").textContent = "无法连接本地后台。请确认使用本地管理启动命令，然后刷新页面。"; }
