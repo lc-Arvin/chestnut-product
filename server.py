@@ -42,8 +42,8 @@ if __name__ == "__main__":
     with startup_stage("environment_file"):
         load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE"))
 
-HOST = os.environ.get("CHESTNUT_HOST", "127.0.0.1")
-PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "8080")))
+HOST = os.environ.get("CHESTNUT_HOST", "0.0.0.0" if os.environ.get("CHESTNUT_ENV") == "cloud" else "127.0.0.1")
+PORT = int(os.environ.get("PORT", os.environ.get("CHESTNUT_PORT", "80" if os.environ.get("CHESTNUT_ENV") == "cloud" else "8080")))
 ROOT = Path(__file__).resolve().parent
 MODEL = "qwen3.5-livetranslate-flash-realtime"
 LANGUAGE_LABELS = json.loads((ROOT / "shared/languages.json").read_text(encoding="utf-8"))
@@ -1407,7 +1407,7 @@ def main():
 
     def report_started(_message):
         # aiohttp calls this after startup hooks and the listening socket succeed.
-        LOGGER.info("event=service_started url=http://%s:%d", display_host, PORT)
+        LOGGER.info("event=service_started listen_host=%s listen_port=%d url=http://%s:%d", HOST, PORT, display_host, PORT)
         if HOST == "0.0.0.0":
             LOGGER.info("event=network_access_enabled")
         LOGGER.info("event=realtime_endpoint_ready path=/ws")

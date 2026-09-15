@@ -10,7 +10,7 @@
 flowchart LR
     Web[浏览器 Web / 管理员] -->|HTTPS / WSS| Gateway[云托管网关]
     Mini[微信小程序] -->|callContainer / connectContainer| Gateway
-    Gateway -->|HTTP / WS :8080| App[Chestnut Python 单实例]
+    Gateway -->|HTTP / WS :80| App[Chestnut Python 单实例]
     App -->|内网 MySQL :3306| DB[(独立业务库)]
     App -->|WSS 双向翻译| Bailian[百炼实时模型]
     App -.可选会议稿.-> COS[私有 COS Bucket]
@@ -170,7 +170,7 @@ CHESTNUT_PUBLIC_ORIGIN=https://chestnut-api-305195-11-1477663536.sh.run.tcloudba
 1. 按第 2 节建立业务库和应用账号。配置服务与数据库的内网连通。
 2. 绑定 Web 使用的 HTTPS 域名，确定 `CHESTNUT_PUBLIC_ORIGIN`。浏览器麦克风与 Secure Cookie 都要求正式站点使用 HTTPS。HTTP 入口由网关重定向至 HTTPS。
 3. 参考 `.env.cloud.example`，在云托管控制台/密钥管理配置中逐项注入环境变量；值不带 `.env` 语法的包围引号。必填项是百炼两项、MySQL 连接信息、实际 HTTPS Origin、随机签名密钥和首次管理员密码。模板域名和空密码不能直接发布。
-4. 以项目根目录为构建目录，使用 `Dockerfile`，内部端口 8080，启动命令 `python server.py`。镜像默认 `CHESTNUT_ENV=cloud`，以非 root 用户运行；不要打包 `.env`、`data`、`meetings` 和日志。
+4. 以项目根目录为构建目录，使用 `Dockerfile`，内部端口 **80**，启动命令 `python server.py`。镜像默认 `CHESTNUT_ENV=cloud`、`PORT=80`，以非 root 用户运行，通过 `NET_BIND_SERVICE` 绑定低端口；构建时会用该用户实际验证 80 端口绑定。云托管容器端口、就绪探针、存活探针和 `PORT` 必须一致。如果控制台仍有旧的 `PORT=8080`，改成 `80` 或删除该覆盖值。本地默认仍为 8080。不要打包 `.env`、`data`、`meetings` 和日志。[Docker 端口绑定能力说明](https://docs.docker.com/engine/security/)
 5. 实例最小/最大都设为 1，保持一个接收业务流量的版本。HTTP 健康检查使用 `/health`，启动预留至少 30 秒；健康检查会探测 MySQL，数据库不可达时返回 503。
 6. 开启网关 WebSocket 支持，确认服务具有访问百炼公网 WSS 的出口。服务已每 10 秒发送 WebSocket 心跳。平台连接时限、空闲回收规则以当前云托管控制台为准，发布前通过真实小程序和浏览器验证长连接。[云托管 WebSocket 接入](https://docs.cloudbase.net/run/develop/access/websocket)
 7. 首次启动从 `CHESTNUT_ADMIN_BOOTSTRAP_PASSWORD` 设置独立管理员密码，保存 PBKDF2 哈希。之后可删除该环境变量。修改此变量不会覆盖现有密码；云端不开放 `/api/admin/setup`。
@@ -194,8 +194,8 @@ CHESTNUT_PUBLIC_ORIGIN=https://chestnut-api-305195-11-1477663536.sh.run.tcloudba
 | `CHESTNUT_ENV_FILE` | 根目录 `.env` | 本地启动时选择私密配置文件，需在系统环境中设置 |
 | `CHESTNUT_DATABASE_BACKEND` | 本地 `sqlite`，云端 `mysql` | 数据层选择；MySQL 不导入静态码或本地库 |
 | `CHESTNUT_HOST` | 本地 `127.0.0.1`，镜像 `0.0.0.0` | 监听地址；手机访问需监听局域网 |
-| `CHESTNUT_PORT` | `8080` | HTTP/WS 共用端口 |
-| `PORT` | 镜像 `8080` | 优先于 `CHESTNUT_PORT`；容器健康检查读取 PORT，默认 8080 |
+| `CHESTNUT_PORT` | 本地 `8080`、云端 `80` | HTTP/WS 共用端口 |
+| `PORT` | 镜像 `80` | 优先于 `CHESTNUT_PORT`；容器健康检查读取 PORT，默认 80；须与平台容器及探针端口一致 |
 | `CHESTNUT_LOCAL_ADMIN_PORT` | 未设置 | 本地管理启动器端口，优先于 `PORT` |
 | `CHESTNUT_ADMIN_ENABLED` | 程序本地 `0`、模板 `1`、云端 `1` | 开关 Web 后台；关闭后台不会取消 MySQL 邀请保护 |
 | `CHESTNUT_ADMIN_DB` | `data/admin.sqlite3` | 本地 SQLite 文件；MySQL 模式忽略 |
@@ -280,6 +280,7 @@ Remove-Item Env:CHESTNUT_MYSQL_PORT
 
 | 现象 | 检查 |
 | --- | --- |
+| `Liveness/Readiness probe failed ... :80: connection refused`，程序日志却显示 8080 | 平台探针与应用监听端口不一致。当前镜像默认监听 80，平台端口和运行时 `PORT` 均使用 80。检查运行版本的标签是否包含端口修复，避免重新构建旧提交 |
 | `Cloud requires CHESTNUT_PUBLIC_ORIGIN` / 容器不断重启 | 镜像构建已成功，但缺少运行时变量。在云托管待部署版本的环境变量中添加 `CHESTNUT_PUBLIC_ORIGIN`，值为浏览器实际使用的完整 HTTPS 源（如 `https://meet.example.com`，替换为真实域名），不带 `/admin` 或其他路径，不填本地监听地址。仅编辑本机 `.env` 不会更新云端变量，`.env` 不在镜像中。还需核对云端模板中的签名密钥、数据库连接和首次管理员密码 |
 | MySQL 2003 / 超时 | 本机是否误用 10.* 内网地址；公网端口是否为 27839；云端 VPC 和安全组是否连通 |
 | MySQL 1045 | 用户名/密码、新旧变量优先级、账号允许的来源 |

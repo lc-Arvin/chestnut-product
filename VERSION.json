@@ -1,7 +1,7 @@
 {
-  "version": "chestnut-20260915T175723428574Z",
-  "code_ref": "refs/tags/chestnut-20260915T175723428574Z",
-  "commit_time_utc": "2026-09-15T17:57:23Z",
-  "stamped_at_utc": "2026-09-15T17:57:23.428574Z",
-  "source_sha256": "b25923e145203a6d247c4ce0532ebd644c51d6de788905005414a85ddfe8310f"
+  "version": "chestnut-20260915T180631645158Z",
+  "code_ref": "refs/tags/chestnut-20260915T180631645158Z",
+  "commit_time_utc": "2026-09-15T18:06:31Z",
+  "stamped_at_utc": "2026-09-15T18:06:31.645158Z",
+  "source_sha256": "3cdfb3feca76a78308b918d40bba6a2d68c081a4949ac5f0a17c6bb039f9ef8a"
 }

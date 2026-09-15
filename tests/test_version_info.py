@@ -91,6 +91,21 @@ class VersionTests(unittest.TestCase):
                     self.assertIn("invalid-port", result.stderr)
                     self.assertNotIn("event=service_started", result.stdout + result.stderr)
 
+    def test_cloud_defaults_match_port_80_probes_and_local_keeps_8080(self):
+        base = {key: value for key, value in os.environ.items()
+                if not key.startswith(("CHESTNUT_", "DASHSCOPE_", "BAILIAN_", "TENCENTCLOUD_")) and key != "PORT"}
+        for mode, overrides, expected in (
+            ("local", {}, ["127.0.0.1", 8080]),
+            ("cloud", {}, ["0.0.0.0", 80]),
+            ("cloud", {"PORT": "8081"}, ["0.0.0.0", 8081]),
+        ):
+            with self.subTest(mode=mode, overrides=overrides):
+                result = subprocess.run([sys.executable, "-c", "import json,server; print(json.dumps([server.HOST,server.PORT]))"],
+                                        cwd=ROOT, env=dict(base, CHESTNUT_ENV=mode, **overrides),
+                                        capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
