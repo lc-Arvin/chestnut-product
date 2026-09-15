@@ -121,6 +121,32 @@ $env:CHESTNUT_ENV_FILE='.env.mysql'
 
 排查发布结果时，同时核对构建来源的 Git 提交号、部署版本号和该版本日志。旧容器持续重启也会产生新的日志时间；仅看时间不能确认最新代码已经部署。
 
+### 版本日志与提交标记
+
+服务的第一条标准输出是 JSON 日志 `event=service_starting`，在加载 `.env`、解析端口、导入服务依赖和连接数据库之前输出。它只表示尝试启动；监听成功仍以 `event=service_started` 为准。本地管理员启动器也遵循这一顺序。
+
+每次提交使用以下命令（先暂存本次需要提交的文件）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/commit_version.py -m "本次改动说明"
+git push --follow-tags origin main
+```
+
+脚本将 `VERSION.json` 与代码一起提交，并创建指向该提交的附注 Git 标签。后续提交继续使用此脚本，避免沿用旧标记。Git 原生提交时间精确到秒；脚本固定本次提交时间并写入 `commit_time_utc`，另外用 `stamped_at_utc` 记录微秒级版本生成时间。两者均为 UTC（北京时间加 8 小时）。日志字段：
+
+| 字段 | 用途 |
+| --- | --- |
+| `version` / `code_ref` | 唯一时间戳版本号及 Git 标签，云镜像没有 `.git` 也能查询准确提交 |
+| `commit_time_utc` / `stamped_at_utc` | 秒级 Git 提交时间 / 微秒级版本生成时间 |
+| `source_sha256` | 暂存区文件路径、模式和 Git 内容对象 ID 的 SHA-256；排除自引用的 `VERSION.json` |
+| `built_at_utc` | Docker 构建版本信息层的时间；同一层命中缓存时保留原值，本地通常为 `local` |
+| `time_utc` | 当前进程输出日志的时间，容器每次重启都会变化 |
+| `git_commit` / `working_tree_dirty` | 本地存在 Git 元数据时额外输出当前提交 SHA 和工作区是否有修改 |
+
+从日志复制 `code_ref`，运行 `git show --no-patch <code_ref>` 即可找到完整提交 SHA 和说明。云端使用随镜像保存的标签和指纹，无需添加版本环境变量，也不上传 `.git`。可运行 `python version_info.py` 查看当前版本元数据。
+
+### 配置与发布
+
 本项目当前可先尝试使用以下云托管 HTTPS 地址作为 Web 入口；将此键和值分别填写到**云托管待部署版本的运行时环境变量**中（不是只修改电脑上的 `.env`）：
 
 ```dotenv

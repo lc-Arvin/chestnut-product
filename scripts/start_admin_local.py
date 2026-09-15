@@ -5,6 +5,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from version_info import announce_startup_version
+
+if __name__ == "__main__":
+    announce_startup_version()
+
 from local_config import load_local_configuration
 
 load_local_configuration(os.environ.get("CHESTNUT_ENV_FILE", ROOT / ".env"))

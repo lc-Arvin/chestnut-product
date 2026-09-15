@@ -37,12 +37,21 @@ class CloudPackagingTests(unittest.TestCase):
                 shutil.copyfile(source, target)
             self.assertFalse((context / 'miniprogram').exists())
             self.assertTrue((context / 'shared/languages.json').is_file())
+            self.assertTrue((context / 'VERSION.json').is_file())
             # A fresh process imports the packaged server, binds HTTP and serves
             # the health check and language catalog, without using the source tree.
             script = '''
 import asyncio
 from aiohttp.test_utils import TestClient, TestServer
 import server
+import version_info
+
+version_info.write_build_info()
+release = version_info.read_version()
+assert release['version'].startswith('chestnut-')
+assert release['code_ref'] == 'refs/tags/' + release['version']
+assert release['built_at_utc'] != 'local'
+assert 'git_commit' not in release
 
 async def verify():
     async with TestClient(TestServer(server.create_app())) as client:

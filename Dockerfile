@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
+RUN python version_info.py --write-build-info
+
 RUN useradd --create-home --uid 10001 chestnut && chown -R chestnut:chestnut /app
 USER chestnut
 

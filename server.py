@@ -5,6 +5,11 @@ Alibaba Cloud Model Studio, so the DashScope API key never enters browser code.
 The same single-port service runs locally and in WeChat CloudBase Run.
 """
 
+from version_info import announce_startup_version
+
+if __name__ == "__main__":
+    announce_startup_version()
+
 import asyncio
 import base64
 import hashlib
@@ -1349,6 +1354,7 @@ def create_app(*, admin_path=None):
 
 
 def main():
+    announce_startup_version()
     load_bailian_credentials()
     app = create_app()
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
