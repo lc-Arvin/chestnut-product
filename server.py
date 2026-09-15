@@ -1300,12 +1300,14 @@ def create_app(*, admin_path=None):
         if WEB_TOKEN_TTL_SECONDS <= 0:
             raise RuntimeError("CHESTNUT_WEB_TOKEN_TTL_SECONDS must be greater than zero")
         if config.database == "mysql" and admin_path is None:
-            from mysql_store import MySQLAdminStore
+            from mysql_store import MySQLAdminStore, mysql_failure_details
             try:
                 store = MySQLAdminStore()
             except Exception as error:
-                LOGGER.error("event=mysql_initialization_failed error_type=%s", type(error).__name__)
-                raise RuntimeError("MySQL initialization failed; check database, permissions and connection settings") from None
+                reason, hint = mysql_failure_details(error)
+                LOGGER.error("event=mysql_initialization_failed error_type=%s reason=%s hint=%s",
+                             type(error).__name__, reason, hint)
+                raise RuntimeError(f"MySQL initialization failed [{reason}]: {hint}") from None
         else:
             store = AdminStore(admin_path or os.environ.get("CHESTNUT_ADMIN_DB", ROOT / "data" / "admin.sqlite3"), WEB_INVITATIONS)
         if config.cloud and config.admin_enabled and not store.setting("password"):

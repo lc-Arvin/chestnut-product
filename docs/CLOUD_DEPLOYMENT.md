@@ -244,6 +244,9 @@ Remove-Item Env:CHESTNUT_MYSQL_PORT
 | MySQL 2003 / 超时 | 本机是否误用 10.* 内网地址；公网端口是否为 27839；云端 VPC 和安全组是否连通 |
 | MySQL 1045 | 用户名/密码、新旧变量优先级、账号允许的来源 |
 | MySQL 1049 / 初始化失败 | 是否已创建所选业务库，应用账号是否有该库权限 |
+| `mysql_initialization_failed reason=missing_*` | 日志会指出缺少的变量名；核对日志对应版本的运行时环境变量，不能只看待部署配置或本地 `.env` |
+| `reason=mysql_1045` / `mysql_2003` / `mysql_1049` | 分别表示认证失败、无法连接、数据库不存在；日志只显示错误码和固定排查提示，不包含驱动原始消息或密码 |
+| `reason=write_lock_timeout` / `unsupported_schema` | 分别检查同时启动的版本或事务、所选业务库的结构版本；不要清空数据库来绕过问题 |
 | /health 返回 503 | MySQL 连接、权限与可用性；健康探测不验证百炼账户余额/模型权限 |
 | 云端启动要求初始管理员密码 | 空库首次开启后台须提供 BOOTSTRAP_PASSWORD；至少 12 字符 |
 | 管理写操作 403 | PUBLIC_ORIGIN 必须与浏览器地址一致；请求要有正确 Origin 和 CSRF，不以容器 HTTP 地址作为外部源 |

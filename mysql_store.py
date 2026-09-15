@@ -13,19 +13,63 @@ import time
 from admin_store import AdminStore
 
 
+SETUP_HINTS = {
+    "missing_user": "Set CHESTNUT_MYSQL_USER (or CHESTNUT_CLOUD_DB_ADMIN) in the deployed version's runtime environment",
+    "missing_password": "Set CHESTNUT_MYSQL_PASSWORD (or CHESTNUT_CLOUD_DB_PASSWORD) in the deployed version's runtime environment",
+    "missing_host": "Set CHESTNUT_MYSQL_HOST in the deployed version's runtime environment",
+    "missing_database": "Set CHESTNUT_MYSQL_DATABASE to the existing business database name",
+    "invalid_port": "CHESTNUT_MYSQL_PORT must be an integer from 1 to 65535",
+    "invalid_timeout": "CHESTNUT_MYSQL_TIMEOUT_SECONDS must be an integer from 1 to 60",
+    "write_lock_timeout": "Database write lock timed out; check other starting versions or active transactions",
+    "unsupported_schema": "Unsupported MySQL schema version; check the selected database and application version",
+}
+
+
+class MySQLSetupError(RuntimeError):
+    """Only allow predefined diagnostics, never connection values or driver text."""
+    def __init__(self, reason):
+        super().__init__(SETUP_HINTS[reason])
+        self.reason = reason
+
+
+def mysql_failure_details(error):
+    if isinstance(error, MySQLSetupError):
+        return error.reason, SETUP_HINTS[error.reason]
+    code = error.args[0] if error.args and type(error.args[0]) is int else None
+    hints = {
+        1044: "Database access denied; check account permissions for the selected database",
+        1045: "Authentication failed; check runtime username, password and permitted connection sources",
+        1049: "Database does not exist; create CHESTNUT_MYSQL_DATABASE before starting the service",
+        1142: "SQL permission denied; check the application's table creation and data access permissions",
+        2003: "Cannot connect to MySQL; check host, port, VPC routing and firewall rules",
+        2006: "MySQL connection closed; check database availability and network connectivity",
+        2013: "MySQL connection lost; check database availability and network connectivity",
+    }
+    return (f"mysql_{code}" if code is not None else "internal_error",
+            hints.get(code, "Check database configuration, driver dependencies and schema initialization"))
+
+
 def mysql_options():
     def value(name, default=""):
         return os.environ.get("CHESTNUT_MYSQL_" + name, default)
     user = value("USER") or os.environ.get("CHESTNUT_CLOUD_DB_ADMIN", "")
     password = value("PASSWORD") or os.environ.get("CHESTNUT_CLOUD_DB_PASSWORD", "")
-    if not user or not password:
-        raise RuntimeError("Configure CHESTNUT_MYSQL_USER and CHESTNUT_MYSQL_PASSWORD")
     host, database = value("HOST"), value("DATABASE", "chestnut")
-    if not host or not database:
-        raise RuntimeError("Configure CHESTNUT_MYSQL_HOST and CHESTNUT_MYSQL_DATABASE")
-    port, timeout = int(value("PORT", "3306")), int(value("TIMEOUT_SECONDS", "10"))
-    if not 1 <= port <= 65535 or not 1 <= timeout <= 60:
-        raise RuntimeError("MySQL port must be 1..65535 and timeout 1..60 seconds")
+    for name, setting in (("user", user), ("password", password), ("host", host), ("database", database)):
+        if not setting.strip():
+            raise MySQLSetupError("missing_" + name)
+
+    def number(name, default, maximum, reason):
+        try:
+            result = int(value(name, default))
+        except ValueError:
+            raise MySQLSetupError(reason) from None
+        if not 1 <= result <= maximum:
+            raise MySQLSetupError(reason)
+        return result
+
+    port = number("PORT", "3306", 65535, "invalid_port")
+    timeout = number("TIMEOUT_SECONDS", "10", 60, "invalid_timeout")
     options = dict(host=host, port=port, user=user, password=password, database=database,
                    charset="utf8mb4", autocommit=True, connect_timeout=timeout,
                    read_timeout=timeout, write_timeout=timeout)
@@ -80,7 +124,7 @@ class MySQLDatabase:
             raise RuntimeError("Nested database transactions are not supported")
         acquired = self.execute("SELECT GET_LOCK(?,10)", (self.lock_name,)).fetchone()[0]
         if acquired != 1:
-            raise RuntimeError("Database write lock timed out")
+            raise MySQLSetupError("write_lock_timeout")
         self.in_transaction = True
         try:
             self.connection.begin()
@@ -153,7 +197,7 @@ class MySQLAdminStore(AdminStore):
             with self.lock, self.db:
                 version = self.setting("schema_version")
                 if version not in {"", "1"}:
-                    raise RuntimeError("Unsupported MySQL schema version")
+                    raise MySQLSetupError("unsupported_schema")
                 self.db.execute("INSERT IGNORE INTO settings VALUES ('schema_version','1')")
                 self.db.execute("INSERT IGNORE INTO settings VALUES ('signing_secret',?)", (secrets.token_urlsafe(48),))
             self.signing_secret = self.setting("signing_secret")
