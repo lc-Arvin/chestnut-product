@@ -25,7 +25,7 @@
 
 ## 配置和验证
 
-环境变量 `CHESTNUT_TRIAL_SECONDS` 默认 180，0 关闭试用，最大 900。使用进程环境变量设置后重启服务；本地 `.env` 加载器仍只读取百炼凭证。
+环境变量 `CHESTNUT_TRIAL_SECONDS` 默认 180，0 关闭试用，最大 900。使用本地管理启动器时，可在 `.env` 中修改后重启；直接运行 `server.py` 时通过进程环境变量设置。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests

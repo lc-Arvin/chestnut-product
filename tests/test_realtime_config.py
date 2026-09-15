@@ -6,12 +6,20 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from local_config import load_bailian_credentials
+from local_config import load_bailian_credentials, load_local_configuration
 import server
 from websockets.exceptions import InvalidStatus
 
 
 class LocalCredentialTests(unittest.TestCase):
+    def test_local_settings_load_before_server_configuration_and_preserve_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text('CHESTNUT_LOGIN_RATE_LIMIT="10"\nCHESTNUT_TRIAL_SECONDS=180\nCHESTNUT_PORT=8090\nPATH=ignored\n', encoding="utf-8")
+            env = {"CHESTNUT_TRIAL_SECONDS": "60"}
+            load_local_configuration(path, env)
+            self.assertEqual(env, {"CHESTNUT_LOGIN_RATE_LIMIT": "10", "CHESTNUT_TRIAL_SECONDS": "60", "CHESTNUT_PORT": "8090"})
+
     def test_quoted_credentials_bom_comments_and_environment_precedence(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
