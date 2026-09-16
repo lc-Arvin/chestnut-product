@@ -1112,13 +1112,18 @@ async def guard_managed_access(browser, store, identity):
 
 async def websocket_handler(request):
     ip = request_ip(request)
-    if not origin_is_allowed(request):
+    message_auth = request.query.get("auth") == "message"
+    # Origin protects the browser's ambient Cookie credentials. Mini-program
+    # SDK sockets use an explicit first-frame token and may carry a different
+    # Origin in developer tools. Never fall back to cookies in this mode.
+    if not origin_is_allowed(request) and not (message_auth and deployment(request).cloud):
+        LOGGER.warning("event=websocket_handshake_rejected reason=origin auth_mode=%s", "message" if message_auth else "cookie")
         raise web.HTTPForbidden(text="Origin not allowed")
     socket = web.WebSocketResponse(max_msg_size=0, heartbeat=10)
     await socket.prepare(request)
     browser = AiohttpSocket(socket)
-    identity = await asyncio.to_thread(request_identity, request)
-    if request.query.get("auth") == "message":
+    identity = None
+    if message_auth:
         # Mini-program cloud sockets do not need custom handshake headers.
         # No model connection or audio relay exists before authentication.
         try:
@@ -1129,12 +1134,15 @@ async def websocket_handler(request):
             if not isinstance(payload, dict) or payload.get("type") != "auth.authenticate":
                 raise ValueError("Authentication required")
             token = payload.get("token", "")
-            if not isinstance(token, str):
+            if not isinstance(token, str) or not token:
                 raise ValueError("Invalid token")
             identity = await asyncio.to_thread(request_identity, request, token)
         except (ValueError, TypeError, asyncio.TimeoutError):
             identity = None
+    else:
+        identity = await asyncio.to_thread(request_identity, request)
     if not identity:
+        LOGGER.warning("event=websocket_auth_rejected auth_mode=%s", "message" if message_auth else "cookie")
         await record_activity(request, "access_denied", reason="websocket")
         await browser.send(json.dumps({
             "type": "access.denied",

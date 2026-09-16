@@ -8,11 +8,9 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 
 function accessHarness() {
   const storage = new Map(), requests = [];
-  let cloud = true, port = 8080;
   const environment = {
-    CLOUD_ENV_ID: 'test-env', CLOUD_SERVICE: 'api', isCloudEnabled: () => cloud,
+    CLOUD_ENV_ID: 'test-env', CLOUD_SERVICE: 'api',
     cloudConfig: () => ({ env: environment.CLOUD_ENV_ID }),
-    apiUrl: suffix => `http://127.0.0.1:${port}${suffix}`,
   };
   let handler = async request => ({ statusCode: 200, data: request.path === '/api/auth/trial'
     ? { access_token: 'trial', authenticated: true, access_mode: 'trial', trial: { meeting_id: 'trial-id' } }
@@ -20,15 +18,15 @@ function accessHarness() {
   const wx = {
     getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value), removeStorageSync: key => storage.delete(key),
     cloud: { callContainer: request => { requests.push(request); return handler(request); } },
-    request: request => { requests.push(request); Promise.resolve(handler(request)).then(request.success, request.fail); },
+    request: () => { throw new Error('Direct HTTP must never be used'); },
   };
   const context = { module: { exports: {} }, wx, require: () => environment };
   vm.runInNewContext(read('miniprogram/services/access.js'), context);
-  return { access: context.module.exports, environment, wx, requests,
-    handle: fn => { handler = fn; }, local: value => { cloud = false; port = value; } };
+  return { access: context.module.exports, environment, wx, requests, storage,
+    handle: fn => { handler = fn; } };
 }
 
-test('credentials and cached trials are isolated by cloud environment, service and local port', async () => {
+test('credentials and cached trials are isolated by cloud environment and service', async () => {
   const h = accessHarness();
   await h.access.startTrial();
   assert.equal(h.access.trialInfo().meeting_id, 'trial-id');
@@ -39,9 +37,19 @@ test('credentials and cached trials are isolated by cloud environment, service a
   assert.equal(h.access.token(), 'trial');
   h.environment.CLOUD_ENV_ID = 'other-env';
   assert.equal(h.access.token(), '');
-  h.local(8080); await h.access.login('123456');
-  h.local(8081); assert.equal(h.access.token(), '');
-  h.local(8080); assert.equal(h.access.token(), 'signed');
+  h.environment.CLOUD_ENV_ID = 'test-env';
+  assert.equal(h.access.token(), 'trial');
+});
+
+test('legacy local address and credentials cannot affect cloud routing', async () => {
+  const h = accessHarness();
+  h.storage.set('chestnut_server_host', '192.168.1.99');
+  h.storage.set('chestnut_access:v2:local:http://192.168.1.99:8080/', 'local-token');
+  assert.equal(h.access.token(), '');
+  await h.access.status();
+  assert.equal(h.requests[0].config.env, 'test-env');
+  assert.equal(h.requests[0].header['X-WX-SERVICE'], 'api');
+  assert.equal(h.requests[0].header.Authorization, undefined);
 });
 
 test('a late unauthorized response cannot clear a newer login', async () => {
@@ -93,6 +101,8 @@ test('cloud requests carry authentication, service routing and an explicit timeo
 
 test('gateway HTML and SDK timeout failures produce readable errors', async () => {
   const h = accessHarness();
+  h.handle(async () => ({ statusCode: 200, data: '<html>wrong service</html>' }));
+  await assert.rejects(h.access.request('/api/auth/status'), /云服务响应异常/);
   h.handle(async () => ({ statusCode: 502, data: '<html>bad gateway</html>' }));
   await assert.rejects(h.access.request('/api/meetings'), /502/);
   h.handle(() => { throw { errMsg: 'callContainer:fail timeout' }; });

@@ -2,17 +2,8 @@ const access = require("../../services/access");
 const meetingStateApi = require("../../services/meeting-api");
 const languages = require("../../utils/languages");
 const meetingState = require("../../services/meeting-state");
-const environment = require("../../config/environment");
 const recorder = require("../../services/recorder");
 const { safeTopPadding } = require("../../utils/layout");
-
-function isDevTools() {
-  try {
-    return wx.getDeviceInfo().platform === "devtools";
-  } catch (error) {
-    return wx.getSystemInfoSync().platform === "devtools";
-  }
-}
 
 Page({
   data: {
@@ -23,13 +14,9 @@ Page({
     languageRanges: [languages.codes.map(code => languages.labels[code]), languages.codes.map(code => languages.labels[code])],
     languageIndices: [0, 1],
     languagePairLabel: "中文（简体） ⇄ English",
-    cloudEnabled: environment.isCloudEnabled(),
-    serverHost: environment.getServerHost(),
-    serverHint: environment.isCloudEnabled()
-      ? "微信云托管 · 安全连接"
-      : isDevTools() ? "开发者工具可使用 127.0.0.1" : "真机请填写电脑的 Wi-Fi 地址",
-    serverPlaceholder: isDevTools() ? "127.0.0.1" : "例如 192.168.1.20",
-    isDevTools: isDevTools(),
+    cloudStatus: "checking",
+    cloudStatusLabel: "连接中",
+    cloudHint: "正在连接云端服务…",
     safeTop: safeTopPadding(),
   },
 
@@ -39,7 +26,7 @@ Page({
     recorder.stop();
     this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;
-    this.setData({ serverHost: environment.getServerHost(), languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
+    this.setData({ languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
     if (meetingState.state.trialComplete) {
       meetingState.state.trialComplete = false;
       this.action = this.data.pendingSave ? "save" : "start";
@@ -51,11 +38,16 @@ Page({
   onUnload() { this.onHide(); },
   async refreshAccess() {
     const attempt = this.accessRefresh = (this.accessRefresh || 0) + 1;
-    this.setData({ invitationHint: "" });
+    this.setData({ invitationHint: "", cloudStatus: "checking", cloudStatusLabel: "连接中", cloudHint: "正在连接云端服务…" });
     try {
-      const result = await access.status?.();
-      if (attempt === this.accessRefresh) this.updateInvitationHint(result);
-    } catch { /* Starting a meeting performs its own access check. */ }
+      const result = await access.status();
+      if (attempt !== this.accessRefresh) return;
+      this.updateInvitationHint(result);
+      this.setData({ cloudStatus: "connected", cloudStatusLabel: "已连接", cloudHint: "云端服务已连接，可开始会议" });
+    } catch (error) {
+      if (attempt !== this.accessRefresh) return;
+      this.setData({ cloudStatus: "unavailable", cloudStatusLabel: "重试", cloudHint: error.message || "暂时无法连接，请检查网络后重试" });
+    }
   },
   updateInvitationHint(result) {
     let invitationHint = "";
@@ -80,18 +72,6 @@ Page({
     }
     meetingState.state.languagePair = pair;
     this.setData({ languageIndices: indices, languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });
-  },
-
-  handleHostInput(event) {
-    this.setData({ serverHost: event.detail.value });
-  },
-
-  saveHost() {
-    if (this.data.cloudEnabled) return environment.getServerHost();
-    const serverHost = environment.setServerHost(this.data.serverHost);
-    this.setData({ serverHost });
-    this.refreshAccess();
-    return serverHost;
   },
 
   cancelInvite() { this.action = null; this.setData({ inviteVisible: false }); },
@@ -136,16 +116,6 @@ Page({
   async startMeeting() {
     if (this.data.busy) return;
     if (meetingState.state.pendingPayload) { wx.showToast({ title: "请先重试保存上一场会议稿", icon: "none" }); return; }
-    const serverHost = this.saveHost();
-    if (!this.data.cloudEnabled && !this.data.isDevTools && environment.isLoopbackHost(serverHost)) {
-      wx.showModal({
-        title: "请填写电脑地址",
-        content: "手机中的 127.0.0.1 指向手机自身。请填写电脑在同一 Wi-Fi 下的局域网 IP，例如 192.168.1.20。",
-        showCancel: false,
-        confirmText: "我知道了",
-      });
-      return;
-    }
     await this.runAuthorized("start");
   },
 });

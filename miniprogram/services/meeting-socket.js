@@ -2,6 +2,22 @@ const access = require("./access");
 const meetingState = require("./meeting-state");
 const environment = require("../config/environment");
 
+// Keep SDK diagnostics useful without logging credentials, signed URLs or audio.
+function connectionError(error, fallback) {
+  const raw = String(error?.errMsg || error?.message || error?.reason || "");
+  const status = Number(error?.statusCode) || Number(raw.match(/(?:response(?: code)?|status(?:Code)?|HTTP)\s*[:=]?\s*(\d{3})/i)?.[1]);
+  const code = String(error?.errCode ?? error?.code ?? (status || "")).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+  let message = fallback;
+  let retryable = true;
+  if ([401, 403].includes(status) || /permission|unauthoriz|forbidden|权限/i.test(raw)) {
+    message = "云端实时连接被拒绝，请检查小程序调用权限及服务接入配置"; retryable = false;
+  } else if (status === 404 || /invalid.*env|env.*(?:not exist|invalid)|service.*not (?:exist|found)/i.test(raw)) {
+    message = "未找到云端实时服务，请检查云环境和服务配置"; retryable = false;
+  } else if (/timeout|timed out/i.test(raw)) message = "云端实时连接超时";
+  else if (/network|offline|网络/i.test(raw)) message = "网络不可用，无法连接云端实时服务";
+  return { message: code ? `${message}（${code}）` : message, code, retryable };
+}
+
 class MeetingSocket {
   constructor() {
     this.languagePair = [...meetingState.state.languagePair];
@@ -12,6 +28,8 @@ class MeetingSocket {
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
     this.meetingId = access.trialInfo?.()?.meeting_id || "";
+    this.lastFailure = "";
+    this.phase = "idle";
   }
 
   subscribe(event, listener) {
@@ -26,51 +44,65 @@ class MeetingSocket {
 
   scheduleReconnect() {
     if (this.intentionalClose || this.reconnectTimer) return;
+    if (this.reconnectAttempts >= 5) {
+      this.failPermanently(`${this.lastFailure || "云端实时连接失败"}；已暂停自动重试，请点击重新连接`);
+      return;
+    }
     const delay = Math.min(1000 * (2 ** this.reconnectAttempts), 10000);
     this.reconnectAttempts += 1;
     this.emit("state", {
       state: "reconnecting",
-      message: `翻译连接中断，${Math.ceil(delay / 1000)} 秒后自动重连…`,
+      message: `${this.lastFailure || "翻译连接中断"}，${Math.ceil(delay / 1000)} 秒后自动重连…`,
     });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.connect(true);
     }, delay);
   }
 
-  connect() {
+  failPermanently(message) {
     this.close();
+    this.emit("event", { type: "error", retryable: false, error: { message } });
+  }
+
+  reportFailure(error, fallback) {
+    const detail = connectionError(error, fallback);
+    this.lastFailure = detail.message;
+    console.warn("[Chestnut realtime]", JSON.stringify({ event: "connection_failed", phase: this.phase,
+      code: detail.code, retryable: detail.retryable, attempt: this.reconnectAttempts,
+      environment: environment.CLOUD_ENV_ID, service: environment.CLOUD_SERVICE }));
+    if (!detail.retryable) this.failPermanently(detail.message);
+    else this.scheduleReconnect();
+  }
+
+  connect(retrying = false) {
+    this.close();
+    if (!retrying) { this.reconnectAttempts = 0; this.lastFailure = ""; }
     this.intentionalClose = false;
+    this.phase = "cloud_connect";
     const generation = ++this.generation;
     this.emit("state", {
       state: "connecting",
-      message: environment.isCloudEnabled() ? "正在连接云端翻译服务…" : "正在连接本地翻译服务…",
+      message: "正在连接云端翻译服务…",
     });
 
     this.meetingId = this.meetingId || meetingState.state.startedAt || "mini-meeting";
     const query = `?auth=message&meeting_id=${encodeURIComponent(this.meetingId)}&languages=${encodeURIComponent(this.languagePair.join(","))}`;
-    if (environment.isCloudEnabled() && typeof wx.cloud?.connectContainer !== "function") {
+    if (typeof wx.cloud?.connectContainer !== "function") {
       this.intentionalClose = true;
       this.emit("event", { type: "error", retryable: false, error: { message: "当前微信不支持云端实时翻译，请升级微信后重试" } });
       return;
     }
     let connection;
     try {
-      connection = environment.isCloudEnabled()
-      ? wx.cloud.connectContainer({
-          service: environment.CLOUD_SERVICE,
-          path: `/ws${query}`,
-        })
-      : Promise.resolve({
-          socketTask: wx.connectSocket({
-            url: `${environment.websocketUrl()}${query}`,
-            tcpNoDelay: true,
-            timeout: 20000,
-          }),
-        });
+      connection = wx.cloud.connectContainer({
+        config: environment.cloudConfig(),
+        service: environment.CLOUD_SERVICE,
+        path: `/ws${query}`,
+        timeout: 20000,
+      });
     } catch (error) {
-      this.intentionalClose = true;
-      this.emit("event", { type: "error", retryable: false, error: { message: "无法启动实时连接，请检查微信版本和服务配置" } });
+      this.reportFailure(error, "无法启动实时连接，请检查微信版本和云服务配置");
       return;
     }
 
@@ -83,8 +115,10 @@ class MeetingSocket {
 
       task.onOpen(() => {
         if (generation !== this.generation) return;
-        task.send({ data: JSON.stringify({ type: "auth.authenticate", token: access.token() }) });
+        this.phase = "authenticating";
         this.emit("state", { state: "connected", message: "服务已连接，正在准备翻译…" });
+        task.send({ data: JSON.stringify({ type: "auth.authenticate", token: access.token() }),
+          fail: error => { if (generation === this.generation) this.reportFailure(error, "实时连接认证消息发送失败"); } });
       });
 
       task.onMessage(({ data }) => {
@@ -92,8 +126,17 @@ class MeetingSocket {
         if (typeof data !== "string") return;
         try {
           const event = JSON.parse(data);
+          if (event.type === "connection.rate_limited") {
+            this.failPermanently("连接过于频繁，请稍等一分钟后点击重新连接");
+            return;
+          }
           if (event.type === "access.denied" || event.type === "meeting.rejected" || event.type === "trial.ended" || (event.type === "error" && event.retryable === false)) { this.intentionalClose = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-          if (event.type === "session.updated") this.reconnectAttempts = 0;
+          if (event.type === "error") {
+            this.phase = "translation";
+            this.lastFailure = event.error?.message || "云端翻译服务返回错误";
+          }
+          if (event.type === "session.created") this.phase = "translation_setup";
+          if (event.type === "session.updated") { this.reconnectAttempts = 0; this.lastFailure = ""; this.phase = "streaming"; }
           this.emit("event", event);
         } catch (error) {
           this.emit("error", { message: "收到无法解析的服务消息" });
@@ -102,27 +145,20 @@ class MeetingSocket {
 
       task.onError((error) => {
         if (generation !== this.generation || this.intentionalClose) return;
-        const serverHost = environment.getServerHost();
-        const loopbackMessage = environment.isCloudEnabled()
-          ? "无法连接云端翻译服务，请稍后重试"
-          : environment.isLoopbackHost(serverHost)
-            ? "真机不能使用 127.0.0.1，请返回 Setup 填写电脑的 Wi-Fi 地址"
-            : `无法连接 ${environment.websocketUrl()}，请确认手机与电脑处于同一 Wi-Fi 且 Chestnut 服务已启动`;
-        this.emit("state", { state: "reconnecting", message: loopbackMessage });
-        this.scheduleReconnect();
+        this.reportFailure(error, this.lastFailure || "无法连接云端实时服务");
       });
 
-      task.onClose(() => {
+      task.onClose((event) => {
         if (generation !== this.generation) return;
         this.task = null;
         if (!this.intentionalClose) {
-          this.scheduleReconnect();
+          if (event?.code === 1008) this.failPermanently(this.lastFailure || "实时连接被服务拒绝，请返回首页重新验证邀请码");
+          else this.reportFailure(event, this.lastFailure || (this.phase === "cloud_connect" ? "云端 WebSocket 握手失败" : "翻译连接中断"));
         }
       });
     }).catch((error) => {
       if (generation !== this.generation) return;
-      this.emit("state", { state: "reconnecting", message: "无法建立翻译服务连接，正在自动重试…" });
-      this.scheduleReconnect();
+      this.reportFailure(error, "无法建立云端实时连接");
     });
   }
 

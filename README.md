@@ -7,7 +7,9 @@ ChestnutOne 是一个面向国际会议工作人员的极简双语同传产品�
 - 仓库根目录：现有 Web Conference Console
 - `miniprogram/`：微信原生小程序客户端
 
-小程序的开发者工具导入、局域网调试和已知限制请阅读 [`miniprogram/README.md`](miniprogram/README.md)。开发进度见 [`docs/MINIPROGRAM_MVP_PLAN.md`](docs/MINIPROGRAM_MVP_PLAN.md)。
+小程序所有版本默认连接云服务，开发者工具导入与验收请阅读 [`miniprogram/README.md`](miniprogram/README.md)。Web/Python 保留本地调试能力。开发进度见 [`docs/MINIPROGRAM_MVP_PLAN.md`](docs/MINIPROGRAM_MVP_PLAN.md)。
+
+部署前必读 [`docs/DEPLOYMENT_LESSONS.md`](docs/DEPLOYMENT_LESSONS.md)：记录端口/探针不一致、旧源码重建、运行时配置遗漏等实际问题，以及版本标记、平台探活、公网版本和客户端链路的逐层验收要求。
 
 ## 本地管理后台
 

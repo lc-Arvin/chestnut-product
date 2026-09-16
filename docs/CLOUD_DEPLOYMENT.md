@@ -101,13 +101,10 @@ $env:CHESTNUT_ENV_FILE='.env.mysql'
 
 ### 3.3 小程序调试与发布
 
-编辑 `miniprogram/config/environment.js`：
+小程序开发版、体验版和正式版全部连接云托管，不提供本地服务地址或自动回退。本地调试使用 Web/Python。编辑 `miniprogram/config/environment.js`：
 
 | 配置 | 用途 |
 | --- | --- |
-| `TRANSPORT_MODE` | `auto`：开发版用本地/LAN，体验版/正式版用云；`local`：强制本地；`cloud`：强制云，适合开发工具联调云端 |
-| `DEFAULT_SERVER_HOST` | 本地默认主机；手机测试用电脑局域网 IP，也可在现有页面里修改服务地址 |
-| `HTTP_PORT` | 本地 HTTP/WS 端口，默认 8080，须与 Python 监听端口一致 |
 | `CLOUD_ENV_ID` | 实际微信云托管环境 ID，是公开客户端配置，不是密钥 |
 | `CLOUD_SERVICE` | 云托管服务名，当前约定 `chestnut-api` |
 
@@ -116,6 +113,8 @@ $env:CHESTNUT_ENV_FILE='.env.mysql'
 微信网关注入的 `X-WX-OpenID` 仅在来源 IP 属于 `CHESTNUT_TRUSTED_PROXY_CIDRS` 时被信任。填写真实网关出口地址/网段，并确认网关覆盖客户端自带的身份头；不要把公网来源或任意网络都设为可信。未配置时小程序仍可按签名客户端凭证使用服务，但不会获得可信 OpenID 绑定。
 
 ## 4. 微信云托管发布步骤
+
+发布前先阅读 [部署复盘与发布检查](DEPLOYMENT_LESSONS.md)。不要凭构建成功、启动日志或旧版本的 HTTP 200 判断新版本发布完成。
 
 配置运行时环境变量后，重新部署并检查新版本的启动日志。若使用 Git 推送触发部署，可提交一处文档更新；以新版本部署结果确认配置生效，避免将旧版本日志误认为本次结果。
 
@@ -292,7 +291,7 @@ Remove-Item Env:CHESTNUT_MYSQL_PORT
 | 云端启动要求初始管理员密码 | 空库首次开启后台须提供 BOOTSTRAP_PASSWORD；至少 12 字符 |
 | 管理写操作 403 | PUBLIC_ORIGIN 必须与浏览器地址一致；请求要有正确 Origin 和 CSRF，不以容器 HTTP 地址作为外部源 |
 | 后台登录后又退出 | Web 是否实际使用 HTTPS；云端 Cookie 始终带 Secure，反向代理内部 HTTP 不影响此标记 |
-| 小程序仍连 localhost | 开发版 auto 模式按设计走本地；测试云端时设 TRANSPORT_MODE=cloud |
+| 小程序仍出现 IP 输入框或连 localhost | 当前小程序仅走云托管。核对开发工具导入路径与代码版本并重新编译；旧本地地址缓存不会影响当前路由。云端失败时检查环境关联和调用权限，不切回本地 |
 | 微信身份不绑定 | 网关来源是否在可信 CIDR；当前使用的是微信云托管、关联 AppID 和平台注入链路是否正确 |
 | Translation disconnected | 百炼 Key、业务空间 Host、模型权限及公网 WSS 出口；查标准输出的错误类型及 Request ID |
 | 服务重启后试用需重新进入 | 当前进程内短期试用状态已清空，符合单实例首版边界；正式邀请码和存稿不会丢失 |

@@ -79,23 +79,12 @@
   font-weight: 650;
 }
 
-.server-row {
-  grid-template-columns: 62rpx minmax(0, 1fr);
-  padding-top: 16rpx;
-  padding-bottom: 16rpx;
-}
-
-.server-input {
-  grid-column: 2;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 14rpx 18rpx;
-  background: white;
-  border: 1rpx solid var(--line);
-  border-radius: 15rpx;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 24rpx;
-}
+.cloud-row { padding-top: 20rpx; padding-bottom: 20rpx; }
+.cloud-row .setting-hint { line-height: 1.5; }
+.cloud-status { color: var(--muted); font-size: 23rpx; white-space: nowrap; }
+.cloud-status--connected { color: var(--green); font-weight: 650; }
+.cloud-retry { margin: 0; padding: 8rpx 18rpx; color: var(--blue); background: var(--blue-soft); border-radius: 12rpx; font-size: 23rpx; line-height: 1.5; }
+.cloud-retry::after { border: 0; }
 
 .setup-brand { justify-content: center; margin-bottom: 26rpx; }
 .invitation-hint { margin: 0 0 24rpx; padding: 16rpx 20rpx; border-radius: 12rpx; background: var(--blue-soft); color: var(--blue); font-size: 22rpx; line-height: 1.7; text-align: center; overflow-wrap: anywhere; }

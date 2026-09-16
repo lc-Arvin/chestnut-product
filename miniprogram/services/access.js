@@ -1,7 +1,5 @@
 const environment = require("../config/environment");
-const key = () => `chestnut_access:v2:${environment.isCloudEnabled()
-  ? `cloud:${environment.CLOUD_ENV_ID}:${environment.CLOUD_SERVICE}`
-  : `local:${environment.apiUrl("/")}`}`;
+const key = () => `chestnut_access:v2:cloud:${environment.CLOUD_ENV_ID}:${environment.CLOUD_SERVICE}`;
 let latestStatus = null;
 let revision = 0;
 function currentStatus() { return latestStatus?.key === key() ? latestStatus.value : null; }
@@ -15,17 +13,16 @@ async function request(path, method = "GET", data) {
   if (requestToken) header.Authorization = `Bearer ${requestToken}`;
   let response;
   try {
-    if (environment.isCloudEnabled()) {
-      if (typeof wx.cloud?.callContainer !== "function") throw new Error("当前微信不支持云端服务，请升级微信后重试");
-      response = await wx.cloud.callContainer({ config: environment.cloudConfig(), path, method, header, data, timeout: 15000 });
-    } else {
-      response = await new Promise((resolve, reject) => wx.request({ url: environment.apiUrl(path), method, header, data, timeout: 15000, success: resolve, fail: reject }));
-    }
+    if (typeof wx.cloud?.callContainer !== "function") throw new Error("当前微信不支持云端服务，请升级微信后重试");
+    response = await wx.cloud.callContainer({ config: environment.cloudConfig(), path, method, header, data, timeout: 15000 });
   } catch (cause) {
     if (cause instanceof Error) throw cause;
     throw new Error(/timeout/i.test(cause?.errMsg || "") ? "服务响应超时，请稍后重试" : "无法连接服务，请检查网络后重试");
   }
-  if (response.statusCode >= 200 && response.statusCode < 300) return response.data;
+  if (response.statusCode >= 200 && response.statusCode < 300) {
+    if (!response.data || typeof response.data !== "object") throw new Error("云服务响应异常，请稍后重试");
+    return response.data;
+  }
   const detail = response.data?.error;
   const error = new Error(typeof detail === "string" ? detail : `服务暂不可用 (${response.statusCode})，请稍后重试`);
   error.status = response.statusCode;

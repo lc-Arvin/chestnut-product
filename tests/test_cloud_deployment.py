@@ -2,9 +2,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from aiohttp import web
+from aiohttp import web, WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 import server
 from admin_http import STORE_KEY
@@ -121,6 +121,45 @@ class CloudBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_cloud_origin_is_not_derived_from_spoofed_host(self):
         response = await self.client.post("/api/auth/invite", json={}, headers={"Origin": "https://evil.example", "Host": "evil.example"})
         self.assertEqual(response.status, 403)
+
+    async def mini_credential(self):
+        code = self.store.create_codes({"label": "socket-test"})[0]["code"]
+        response = await self.client.post("/api/auth/invite", json={
+            "client_id": "cloud-socket-test", "client_type": "miniprogram", "code": code})
+        self.assertEqual(response.status, 200)
+        return (await response.json())["access_token"]
+
+    async def test_cloud_mini_socket_accepts_sdk_origin_only_with_valid_first_frame(self):
+        token = await self.mini_credential()
+        for origin in ("https://servicewechat.com", "http://127.0.0.1:12345"):
+            with patch.object(server, "handle_browser", new_callable=AsyncMock) as model:
+                socket = await self.client.ws_connect("/ws?auth=message&languages=zh,en", headers={"Origin": origin})
+                model.assert_not_called()
+                await socket.send_json({"type": "auth.authenticate", "token": token})
+                await socket.receive(timeout=3)
+                model.assert_awaited_once()
+                await socket.close()
+
+    async def test_cross_origin_message_socket_cannot_reuse_cookie_or_header_credentials(self):
+        token = await self.mini_credential()
+        for payload in ({"type": "auth.authenticate"}, {"type": "auth.authenticate", "token": "invalid"},
+                        {"type": "session.finish"}):
+            with patch.object(server, "handle_browser", new_callable=AsyncMock) as model:
+                socket = await self.client.ws_connect("/ws?auth=message", headers={
+                    "Origin": "https://evil.example", "Cookie": f"chestnut_access={token}",
+                    "Authorization": f"Bearer {token}"})
+                await socket.send_json(payload)
+                self.assertEqual((await socket.receive_json(timeout=3))["type"], "access.denied")
+                model.assert_not_called()
+                await socket.close()
+
+    async def test_cookie_websocket_still_rejects_foreign_origins(self):
+        token = await self.mini_credential()
+        for path in ("/ws", "/ws?auth=cookie"):
+            with self.assertRaises(WSServerHandshakeError) as error:
+                await self.client.ws_connect(path, headers={"Origin": "https://servicewechat.com",
+                                                          "Cookie": f"chestnut_access={token}"})
+            self.assertEqual(error.exception.status, 403)
 
     async def test_database_outage_is_reported_by_health_probe(self):
         with patch.object(self.store, "dialect", "mysql"), patch.object(self.store, "health", create=True, side_effect=ConnectionError):

@@ -5,21 +5,29 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../miniprogram/config/environment.js'), 'utf8');
 
-function environment(version, mode = 'auto') {
+function environment(version, code = source) {
   const context = { module: { exports: {} }, wx: {
     getAccountInfoSync: () => ({ miniProgram: { envVersion: version } }),
-    getStorageSync: () => '',
+    getStorageSync: () => { throw Error('Legacy host storage must not be read'); },
   }};
-  vm.runInNewContext(source.replace('const TRANSPORT_MODE = "auto";', `const TRANSPORT_MODE = "${mode}";`), context);
+  vm.runInNewContext(code, context);
   return context.module.exports;
 }
-test('auto keeps developer builds local and routes trial/release to cloud', () => {
-  assert.equal(environment('develop').isCloudEnabled(), false);
-  assert.equal(environment('trial').isCloudEnabled(), true);
-  assert.equal(environment('release').isCloudEnabled(), true);
+
+test('developer, trial and release builds all use the production cloud service', () => {
+  for (const version of ['develop', 'trial', 'release', undefined]) {
+    const config = environment(version);
+    assert.equal(config.cloudConfig().env, 'chestnut-prod-d6ggcq8yzf8d2e322');
+    assert.equal(config.CLOUD_SERVICE, 'chestnut-api');
+    for (const name of ['getServerHost', 'setServerHost', 'apiUrl', 'websocketUrl', 'TRANSPORT_MODE']) {
+      assert.equal(config[name], undefined);
+    }
+  }
 });
-test('explicit mode supports cloud debugging and local override', () => {
-  assert.equal(environment('develop', 'cloud').isCloudEnabled(), true);
-  assert.equal(environment('release', 'local').isCloudEnabled(), false);
-  assert.equal(environment('develop').websocketUrl(), 'ws://127.0.0.1:8080/ws');
+
+test('missing cloud routing configuration fails instead of falling back locally', () => {
+  for (const key of ['CLOUD_ENV_ID', 'CLOUD_SERVICE']) {
+    const config = environment('develop', source.replace(new RegExp(`const ${key} = "[^"]*";`), `const ${key} = "";`));
+    assert.throws(() => config.cloudConfig(), /云服务尚未配置/);
+  }
 });

@@ -26,29 +26,14 @@
         <view class="ready"><view class="status-dot"></view>Ready</view>
       </view>
 
-      <view wx:if="{{cloudEnabled}}" class="setting-row">
+      <view class="setting-row cloud-row">
         <view class="setting-icon">☁</view>
         <view class="setting-copy">
           <text class="setting-title">云端翻译服务</text>
-          <text class="setting-hint">{{serverHint}}</text>
+          <text class="setting-hint">{{cloudHint}}</text>
         </view>
-        <view class="ready">已配置</view>
-      </view>
-
-      <view wx:else class="setting-row server-row">
-        <view class="setting-icon">↗</view>
-        <view class="setting-copy">
-          <text class="setting-title">本地服务地址</text>
-          <text class="setting-hint">{{serverHint}}</text>
-        </view>
-        <input
-          class="server-input"
-          value="{{serverHost}}"
-          bindinput="handleHostInput"
-          bindblur="saveHost"
-          placeholder="{{serverPlaceholder}}"
-          confirm-type="done"
-        />
+        <button wx:if="{{cloudStatus === 'unavailable'}}" class="cloud-retry" bindtap="refreshAccess" aria-label="重新连接云服务">重试</button>
+        <text wx:else class="cloud-status cloud-status--{{cloudStatus}}">{{cloudStatusLabel}}</text>
       </view>
     </view>
 

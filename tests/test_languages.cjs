@@ -52,17 +52,16 @@ test('mini program routes both directions and ignores unrelated originals', () =
   assert.deepEqual(state.state.entries.map(x => x.language), ['ja', 'fr', 'fr', 'ja']);
 });
 
-test('mini program reconnect keeps pair for local and cloud connections', async () => {
-  for (const cloud of [false, true]) {
+test('mini program reconnect keeps pair through the cloud SDK', async () => {
     const urls = [];
     const socketTask = { onOpen() {}, onMessage() {}, onError() {}, onClose() {}, close() {} };
     const context = vm.createContext({
       module: { exports: {} }, setTimeout, clearTimeout,
       require: name => name.endsWith('meeting-state') ? state : {
-        isCloudEnabled: () => cloud, websocketUrl: () => 'ws://localhost/ws', CLOUD_SERVICE: 'test',
+        CLOUD_SERVICE: 'test', cloudConfig:()=>({env:'test-env'}),
       },
       wx: {
-        connectSocket: ({ url }) => { urls.push(url); return socketTask; },
+        connectSocket: () => { throw Error('Direct WebSocket must never be used'); },
         cloud: { connectContainer: ({ path }) => { urls.push(path); return Promise.resolve({ socketTask }); } },
       },
     });
@@ -77,7 +76,6 @@ test('mini program reconnect keeps pair for local and cloud connections', async 
     assert.equal(urls.length, 2);
     for (const url of urls) assert.equal(new URL(url, 'http://localhost').searchParams.get('languages'), 'ja,fr');
     socket.close();
-  }
 });
 
 function webContext() {

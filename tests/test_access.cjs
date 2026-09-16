@@ -132,7 +132,7 @@ test('Mini trial countdown expires while paused and reconnect retains the assign
   const paths=[];
   const task={onOpen(){},onMessage(){},onClose(){},onError(){},close(){}};
   const s=vm.createContext({module:{exports:{}},setTimeout,clearTimeout,wx:{cloud:{connectContainer:async opts=>{paths.push(opts.path);return {socketTask:task};}}},
-    require:name=>name.endsWith('/access')?{trialInfo:()=>({meeting_id:'trial-fixed'})}:name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,CLOUD_SERVICE:'api'}});
+    require:name=>name.endsWith('/access')?{trialInfo:()=>({meeting_id:'trial-fixed'})}:name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,CLOUD_SERVICE:'api',cloudConfig:()=>({env:'test-env'})}});
   vm.runInContext(source('miniprogram/services/meeting-socket.js'),s);
   const socket=new s.module.exports();socket.connect();await Promise.resolve();socket.connect();await Promise.resolve();
   assert.ok(paths.every(p=>p.includes('meeting_id=trial-fixed')));socket.close();
@@ -157,11 +157,10 @@ function miniSetup(access, save=async()=>{}) {
   state.reset();let page;const visits=[];let mic=0;
   const c=vm.createContext({Page:value=>page=value,wx:{getDeviceInfo:()=>({platform:'devtools'}),navigateTo:o=>visits.push(o.url),showToast(){},showModal(){}},
     require:name=> {
-      if(name.endsWith('/access'))return {recordVisit:async()=>{},...access};
+      if(name.endsWith('/access'))return {recordVisit:async()=>{},status:async()=>({auth_required:true,authenticated:false}),...access};
       if(name.endsWith('/meeting-api'))return {saveMeeting:save};
       if(name.endsWith('/meeting-state'))return state;
       if(name.endsWith('/languages'))return require('../miniprogram/utils/languages');
-      if(name.endsWith('/environment'))return {isCloudEnabled:()=>true,getServerHost:()=> 'localhost'};
       if(name.endsWith('/recorder'))return {stop(){},start(){mic++;}};
       if(name.endsWith('/layout'))return {safeTopPadding:()=>50};
       throw Error(name);
@@ -169,6 +168,29 @@ function miniSetup(access, save=async()=>{}) {
   vm.runInContext(source('miniprogram/pages/setup/setup.js'),c);page.setData=data=>Object.assign(page.data,data);
   return {page,visits,mic:()=>mic};
 }
+
+test('Mini setup waits for actual cloud response and supports retry after failure',async()=>{
+  let resolve, fail=true;
+  const {page}=miniSetup({status:()=>new Promise(done=>{resolve=done;})});
+  const pending=page.refreshAccess();
+  assert.equal(page.data.cloudStatus,'checking');
+  resolve({authenticated:false});await pending;
+  assert.equal(page.data.cloudStatus,'connected');
+  assert.equal(page.data.serverHost,undefined);
+  const retry=miniSetup({status:async()=>{if(fail)throw Error('网络暂不可用');return {authenticated:false};}}).page;
+  await retry.refreshAccess();
+  assert.equal(retry.data.cloudStatus,'unavailable');
+  assert.equal(retry.data.cloudHint,'网络暂不可用');
+  fail=false;await retry.refreshAccess();
+  assert.equal(retry.data.cloudStatus,'connected');
+});
+
+test('Mini setup ignores a cloud check that finishes after leaving the page',async()=>{
+  let resolve;const {page}=miniSetup({status:()=>new Promise(done=>{resolve=done;})});
+  const pending=page.refreshAccess();page.onHide();
+  resolve({authenticated:false});await pending;
+  assert.equal(page.data.cloudStatus,'checking');
+});
 
 test('Mini setup displays invitation expiry in Beijing time and hides it for trials',()=>{
   const {page}=miniSetup({});
@@ -210,7 +232,7 @@ test('Mini cloud socket authenticates with first message and stops reconnect on 
   const task={send:x=>sent.push(JSON.parse(x.data)),onOpen:fn=>open=fn,onMessage:fn=>message=fn,onClose:fn=>close=fn,onError(){},close(){}};
   const c=vm.createContext({module:{exports:{}},setTimeout:()=>{timers++;},clearTimeout(){},
     wx:{cloud:{connectContainer:async()=>({socketTask:task})}},
-    require:name=>name.endsWith('/access')?{token:()=> 'signed-credential'}:name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,CLOUD_SERVICE:'api'}});
+    require:name=>name.endsWith('/access')?{token:()=> 'signed-credential'}:name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,CLOUD_SERVICE:'api',cloudConfig:()=>({env:'test-env'})}});
   vm.runInContext(source('miniprogram/services/meeting-socket.js'),c);
   const socket=new c.module.exports();socket.connect();await Promise.resolve();open();
   assert.deepEqual(sent,[{type:'auth.authenticate',token:'signed-credential'}]);
@@ -257,7 +279,7 @@ test('Mini terminal translation errors do not reconnect or overwrite the error',
     const task={onOpen(){},onMessage:fn=>message=fn,onClose:fn=>close=fn,onError:fn=>onError=fn,close(){}};
     const c=vm.createContext({module:{exports:{}},setTimeout:()=>++timers,clearTimeout(){},
       wx:{cloud:{connectContainer:async()=>({socketTask:task})}},
-      require:name=>name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,getServerHost:()=> 'localhost',CLOUD_SERVICE:'api'}});
+      require:name=>name.endsWith('meeting-state')?state:{isCloudEnabled:()=>true,getServerHost:()=> 'localhost',CLOUD_SERVICE:'api',cloudConfig:()=>({env:'test-env'})}});
     vm.runInContext(source('miniprogram/services/meeting-socket.js'),c);
     const socket=new c.module.exports();socket.subscribe('state',value=>states.push(value.state));
     socket.connect();await Promise.resolve();
