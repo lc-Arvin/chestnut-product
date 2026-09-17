@@ -94,3 +94,6 @@
 .language-row { grid-template-columns: 62rpx minmax(0, 1fr); padding-top: 20rpx; padding-bottom: 20rpx; }
 .language-row picker { grid-column: 2; min-width: 0; }
 .language-row .setting-value { display: block; max-width: none; text-align: left; line-height: 1.5; overflow-wrap: anywhere; }
+.timeline-preview { margin-top: 36rpx; text-align: center; }
+.preview-description { color: var(--muted); font-size: 27rpx; line-height: 1.8; }
+.preview-guide { margin-top: 30rpx; padding: 24rpx; border-radius: 18rpx; color: var(--blue); background: var(--blue-soft); font-size: 26rpx; line-height: 1.6; }

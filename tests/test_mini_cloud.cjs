@@ -6,6 +6,66 @@ const path = require('node:path');
 const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+function sharePage(scene) {
+  let page;
+  const calls = [];
+  vm.runInNewContext(read('miniprogram/pages/setup/setup.js'), {
+    Page: value => { page = value; },
+    wx: { getLaunchOptionsSync: () => ({ scene }), showShareMenu: options => calls.push(options.menus) },
+    require: name => {
+      if (name.endsWith('/languages')) return { codes: ['zh', 'en'], labels: { zh: '中文', en: 'English' } };
+      if (name.endsWith('/layout')) return { safeTopPadding: () => 0 };
+      // Preview must not even load the recorder module, which creates its manager eagerly.
+      if (name.endsWith('/recorder')) throw Error('Preview initialized recorder');
+      if (name.endsWith('/access')) return { recordVisit() { throw Error('Preview called cloud'); } };
+      return {};
+    },
+  });
+  return { page, calls };
+}
+
+test('timeline preview opens without cloud, recorder or share-menu side effects', () => {
+  const { page, calls } = sharePage(1154);
+  assert.equal(page.data.timelinePreview, true);
+  page.onLoad();
+  page.onShow();
+  assert.equal(calls.length, 0);
+  assert.equal(page.data.inviteVisible, false);
+});
+
+test('normal and full-app timeline entry enable both menus and drop inbound share parameters', () => {
+  const appPages = JSON.parse(read('miniprogram/app.json')).pages;
+  for (const scene of [1001, 1155]) {
+    const { page, calls } = sharePage(scene);
+    assert.equal(page.data.timelinePreview, false);
+    page.onLoad();
+    assert.equal(JSON.stringify(calls), '[["shareAppMessage","shareTimeline"]]');
+    page.options = { invite: 'private-code', token: 'private-token' };
+    const friend = page.onShareAppMessage(), timeline = page.onShareTimeline();
+    assert.ok(appPages.includes(friend.path.slice(1)));
+    assert.equal(timeline.query, '');
+    assert.equal(timeline.path, undefined);
+    for (const card of [friend, timeline]) {
+      assert.doesNotMatch(JSON.stringify(card), /private-/);
+      assert.ok(fs.existsSync(path.join(__dirname, '..', 'miniprogram', card.imageUrl)));
+    }
+  }
+});
+
+test('app skips authenticated cloud initialization only in timeline single-page mode', () => {
+  for (const scene of [1001, 1154, 1155]) {
+    let app, initializations = 0, resets = 0;
+    vm.runInNewContext(read('miniprogram/app.js'), {
+      App: value => { app = value; },
+      wx: { cloud: { init: () => initializations++ } },
+      require: name => name.endsWith('/meeting-state') ? { reset: () => resets++ } : { cloudConfig: () => ({ env: 'test' }) },
+    });
+    app.onLaunch({ scene });
+    assert.equal(initializations, scene === 1154 ? 0 : 1);
+    assert.equal(resets, 1);
+  }
+});
+
 function accessHarness() {
   const storage = new Map(), requests = [];
   const environment = {

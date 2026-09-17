@@ -4,9 +4,15 @@
       <view class="brand-mark">✦</view>
       <text>ChestnutOne</text>
     </view>
-    <view class="title">Meeting Setup</view>
+    <view class="title">{{timelinePreview ? '栗子翻译助手' : 'Meeting Setup'}}</view>
     <view class="subtitle">实时字幕 · 双向翻译 · 会议稿保存</view>
 
+    <view wx:if="{{timelinePreview}}" class="timeline-preview">
+      <view class="preview-description">让跨语言交流更轻松。说话时查看原文与译文，会议结束后保存会议稿。</view>
+      <view class="preview-guide">点击微信下方的「前往小程序」开始体验</view>
+    </view>
+
+    <block wx:else>
     <view class="settings">
       <view class="setting-row language-row">
         <view class="setting-icon">文</view>
@@ -42,7 +48,8 @@
       Start Meeting <text>→</text>
     </button>
     <button wx:if="{{pendingSave}}" bindtap="retrySave" disabled="{{busy}}">重试保存上一场会议稿</button>
+    </block>
   </view>
 </view>
 
-<invite-dialog visible="{{inviteVisible}}" allow-trial="{{!pendingSave}}" bindverified="verified" bindcancel="cancelInvite" />
+<invite-dialog wx:if="{{!timelinePreview}}" visible="{{inviteVisible}}" allow-trial="{{!pendingSave}}" bindverified="verified" bindcancel="cancelInvite" />

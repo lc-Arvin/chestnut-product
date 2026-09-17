@@ -2,11 +2,34 @@ const access = require("../../services/access");
 const meetingStateApi = require("../../services/meeting-api");
 const languages = require("../../utils/languages");
 const meetingState = require("../../services/meeting-state");
-const recorder = require("../../services/recorder");
 const { safeTopPadding } = require("../../utils/layout");
 
 Page({
+  onShareAppMessage() {
+    // Use a fixed cover so invitation details never appear in a page screenshot.
+    return {
+      title: "栗子翻译助手 · 实时字幕，双向翻译",
+      path: "/pages/setup/setup",
+      imageUrl: "/assets/share-logo.png",
+    };
+  },
+
+  onShareTimeline() {
+    return {
+      title: "栗子翻译助手 · 实时字幕，双向翻译",
+      query: "",
+      imageUrl: "/assets/share-logo.png",
+    };
+  },
+
+  onLoad() {
+    if (!this.data.timelinePreview && typeof wx.showShareMenu === "function") {
+      wx.showShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
+    }
+  },
+
   data: {
+    timelinePreview: wx.getLaunchOptionsSync?.()?.scene === 1154,
     inviteVisible: false,
     busy: false,
     pendingSave: false,
@@ -21,9 +44,11 @@ Page({
   },
 
   onShow() {
+    // Timeline previews cannot use the normal authenticated cloud/audio flow.
+    if (this.data.timelinePreview) return;
     access.recordVisit();
     this.refreshAccess();
-    recorder.stop();
+    require("../../services/recorder").stop();
     this.setData({ pendingSave: Boolean(meetingState.state.pendingPayload) });
     const pair = meetingState.state.languagePair;
     this.setData({ languageIndices: pair.map(code => languages.codes.indexOf(code)), languagePairLabel: pair.map(code => languages.labels[code]).join(" ⇄ ") });

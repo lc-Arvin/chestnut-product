@@ -6,8 +6,8 @@ App({
     meetingState,
   },
 
-  onLaunch() {
-    if (typeof wx.cloud?.init === "function") wx.cloud.init(environment.cloudConfig());
+  onLaunch(options = {}) {
+    if (options.scene !== 1154 && typeof wx.cloud?.init === "function") wx.cloud.init(environment.cloudConfig());
     meetingState.reset();
   },
 });
